@@ -1,21 +1,20 @@
 #!/bin/bash
 # Gaussian reconstruction for every scene under DATA_ROOT, one array task per scene.
-# Usage: BACKEND=2dgs SFM=vggt sbatch slurm/recon.sbatch [extra flags]
-# Single scene: sbatch --array=N slurm/recon.sbatch   (N = index in the sorted scene list)
+# Usage: BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch [extra flags]
+# Single scene: sbatch --array=N pace_slurm/recon.sbatch   (N = index in the sorted scene list)
 # BACKEND selects the registered reconstruction backend (2dgs|sugar|pgsr|gw).
 # SFM selects which SfM result feeds it: results/<scene>/all/<SFM>/.
 #SBATCH --job-name=recon
-#SBATCH --account=arthur.porto
-#SBATCH --partition=hpg-rtx6000
+#SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64gb
 #SBATCH --time=3:00:00
 #SBATCH --array=0-5
-#SBATCH --output=slurm/logs/%x-%A_%a.out
-#SBATCH --error=slurm/logs/%x-%A_%a.err
+#SBATCH --output=pace_slurm/logs/%x-%A_%a.out
+#SBATCH --error=pace_slurm/logs/%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
@@ -23,7 +22,7 @@
 set -euo pipefail
 
 # Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
-SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/slurm"
+SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
     exit 2
@@ -38,8 +37,6 @@ esac
 
 SFM="${SFM:-vggt}"
 
-DATA_ROOT="${DATA_ROOT:-/blue/arthur.porto/data/datasets/photogrammetry/main}"
-RESULT_ROOT="${RESULT_ROOT:-/blue/arthur.porto/srizvi63.gatech/results}"
 
 # Sorted so an array index maps to the same scene across submissions.
 mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \

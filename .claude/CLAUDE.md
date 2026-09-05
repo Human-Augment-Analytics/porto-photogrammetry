@@ -35,7 +35,7 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [backend-gaussian-wrapping.md](MEMORY/backend-gaussian-wrapping.md) | GW three stages, components, CUDA submodule matrix |
 | [baseline-meshroom.md](MEMORY/baseline-meshroom.md) | Meshroom wrapper + reference runtimes |
 | [repo-conventions.md](MEMORY/repo-conventions.md) | Doc rule, repo layout, legacy code, ID/naming and commit conventions |
-| [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts, partitions/accounts, GPU switch, batch-env gotchas |
+| [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts for HiPerGator + PACE ICE, partitions/accounts, GPU switch, batch-env gotchas |
 | [augenblick-package.md](MEMORY/augenblick-package.md) | The `src/augenblick` package: ABCs, registry, config bridge, CLI, adding a backend |
 
 `.claude/PLANS/` holds implementation specs for landed refactors — the reasoning and constraints

@@ -22,8 +22,9 @@ It must be installed into **each** per-GPU conda env, since the SLURM jobs call 
 
 | Env | Path | numpy |
 |---|---|---|
-| rtx6000 | `$CONDA_ROOT/augenblick_rtx_pro_6000` | 2.x |
-| b200 | `$CONDA_ROOT/augenblick_b200` | 1.x |
+| rtx6000 (HPG) | `$CONDA_ROOT/augenblick_rtx_pro_6000` | 2.x |
+| b200 (HPG) | `$CONDA_ROOT/augenblick_b200` | 1.x |
+| a100 (PACE) | `$CONDA_ROOT/augenblick_a100` | 2.x |
 
 > The b200 env's `bin/pip` has a stale shebang pointing at a renamed directory; use
 > `<env>/bin/python -m pip` there instead. This predates the package and is unrelated to it.
@@ -107,8 +108,8 @@ do, and which a future N×M sweep driver needs.
 
 `Scene(root)` owns the COLMAP layout: `images_dir`, `masks_dir`, `sparse_dir` (`sparse/0`),
 `has_masks()`, `has_reconstruction()`, `require_images()`, `require_reconstruction()`.
-`has_reconstruction()` checks the directory is **non-empty**, mirroring the shell guard at
-`slurm/recon.sbatch` — an empty `sparse/0/` means SfM failed.
+`has_reconstruction()` checks the directory is **non-empty**, mirroring the shell guard in
+each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
 
 `link_colmap_masks(dest)` centralises the symlink trick both pycolmap paths used: COLMAP wants
 `<image_name>.png`, so `foo.png` is linked as `foo.jpg.png`. It is idempotent.
@@ -168,8 +169,8 @@ still has masks: 184 images, 184 masks), GPU target `rtx6000`:
 
 | Step | Job ID | State | Elapsed | Result |
 |---|---|---|---|---|
-| VGGT SfM (`slurm/vggt_sfm.sbatch`) | 40649294 | COMPLETED | 2:02 | 184/184 images registered, 100,000 points |
-| 2DGS recon (`slurm/recon.sbatch`, `--iterations 2000`) | 40649370 | COMPLETED | 12:01 | mesh at the predicted path, 263 MB |
+| VGGT SfM (`hpg_slurm/vggt_sfm.sbatch`) | 40649294 | COMPLETED | 2:02 | 184/184 images registered, 100,000 points |
+| 2DGS recon (`hpg_slurm/recon.sbatch`, `--iterations 2000`) | 40649370 | COMPLETED | 12:01 | mesh at the predicted path, 263 MB |
 
 Stage timings, useful as the baseline for spotting a future regression:
 

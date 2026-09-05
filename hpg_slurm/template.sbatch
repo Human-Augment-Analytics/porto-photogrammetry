@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copy this file, edit the command block at the bottom, then: sbatch slurm/<yours>.sbatch
+# Copy this file, edit the command block at the bottom, then: sbatch hpg_slurm/<yours>.sbatch
 #SBATCH --job-name=augenblick
 #SBATCH --account=arthur.porto
 #SBATCH --partition=hpg-rtx6000
@@ -10,8 +10,8 @@
 #SBATCH --gpus=1
 #SBATCH --mem=64gb
 #SBATCH --time=4:00:00
-#SBATCH --output=slurm/logs/%x-%j.out
-#SBATCH --error=slurm/logs/%x-%j.err
+#SBATCH --output=hpg_slurm/logs/%x-%j.out
+#SBATCH --error=hpg_slurm/logs/%x-%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
-SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/slurm"
+SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/hpg_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
     exit 2

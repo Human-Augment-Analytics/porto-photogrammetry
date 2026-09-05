@@ -17,10 +17,12 @@ bash scripts/auto_setup.sh          # detects GPU via nvidia-smi, dispatches to 
 | Script | GPU | sm | CUDA module | Torch |
 |--------|-----|----|-------------|-------|
 | `auto_setup.sh` | detect + dispatch | — | — | — |
-| `setup_l40s.sh` | L40S / RTX 6000 Ada | 8.9 | `cuda/12.1.1` | 2.3.1 / cu121 |
-| `setup_a100.sh` | A100 | 8.0 | `cuda/12.1.1` | 2.3.1 / cu121 |
+| `setup_l40s.sh` | L40S / L40 / RTX 6000 Ada | 8.9 | `cuda/13.0.1` | 2.9.1 / cu130 |
+| `setup_a100.sh` | A100 | 8.0 | `cuda/13.0.1` | 2.9.1 / cu130 |
+| `setup_a40.sh` | A40 (48 GB) | 8.6 | `cuda/13.0.1` | 2.9.1 / cu130 |
 | `setup_h100.sh` | H100 / H200 | 9.0 | `cuda/12.1.1` | 2.3.1 / cu121 |
 | `setup_b200.sh` | B200 (original target) | 10.0 | `cuda/12.8` | 2.9.1 / cu130 |
+| `setup_rtx_pro_6000.sh` | RTX Pro 6000 Blackwell | 12.0 | `cuda/13.0.2` | 2.9.1 / cu130 |
 
 Wrappers only export `GPU_LABEL / GPU_ARCH / CUDA_MODULE / TORCH_SPEC / TORCH_INDEX_URL /
 NUMPY_GENERATION` and `exec` into `scripts/setup_common.sh`, which does all the work (7 stages +
@@ -57,8 +59,8 @@ unpinned; each wrapper picks a file via `NUMPY_GENERATION` and `setup_common.sh`
 
 | File | numpy | scipy | sklearn | skimage | imageio | Wrappers | torch |
 |------|-------|-------|---------|---------|---------|----------|-------|
-| `numpy1.txt` | 1.26.4 | 1.10.1 | 1.3.0 | 0.20.0 | 2.16.2 | l40s, a100, h100 | 2.3.1 (cu121) |
-| `numpy2.txt` | 2.2.6 | 1.15.3 | 1.6.1 | 0.25.2 | 2.37.0 | b200, rtx_pro_6000 | 2.9.1 (cu130) |
+| `numpy1.txt` | 1.26.4 | 1.10.1 | 1.3.0 | 0.20.0 | 2.16.2 | l40s, h100 | 2.3.1 (cu121) |
+| `numpy2.txt` | 2.2.6 | 1.15.3 | 1.6.1 | 0.25.2 | 2.37.0 | a100, b200, rtx_pro_6000 | 2.9.1 (cu130) |
 
 A mismatch surfaces two ways, both at import, never at resolve time (the pins are lower bounds,
 so pip accepts either):

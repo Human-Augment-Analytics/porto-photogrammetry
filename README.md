@@ -33,7 +33,7 @@ All combinations are benchmarked on runtime and compared qualitatively against R
 - Linux (tested on RHEL 9)
 - Python 3.10
 - CUDA-capable GPU (80 GB+ VRAM recommended)
-- CUDA 12.1 (Ampere/Hopper) or 12.8+ (Blackwell); see the per-GPU wrappers
+- CUDA 12.1–13.0 depending on the card; see the per-GPU wrappers below
 
 **Note**: VGGT requires a GPU with at least 80 GB of VRAM for large scenes. COLMAP and the reconstruction methods, however, can run on more modest hardware (32-40 GB), with tests conducted on a single NVIDIA A100 PCIe 40 GB.
 
@@ -55,8 +55,9 @@ architecture, toolkit, and PyTorch wheel for your GPU:
 ```bash
 bash scripts/auto_setup.sh      # detect the GPU and dispatch to the right wrapper
 # ...or select explicitly:
-bash scripts/setup_l40s.sh      # L40S  (sm 8.9,  CUDA 12.1 / torch 2.3.1)
-bash scripts/setup_a100.sh      # A100  (sm 8.0,  CUDA 12.1 / torch 2.3.1)
+bash scripts/setup_l40s.sh      # L40S/L40 (sm 8.9, CUDA 13.0 / torch 2.9.1)
+bash scripts/setup_a100.sh      # A100  (sm 8.0,  CUDA 13.0 / torch 2.9.1)
+bash scripts/setup_a40.sh       # A40   (sm 8.6,  CUDA 13.0 / torch 2.9.1)
 bash scripts/setup_h100.sh      # H100  (sm 9.0,  CUDA 12.1 / torch 2.3.1)
 bash scripts/setup_b200.sh      # B200  (sm 10.0, CUDA 12.8 / torch 2.9.1)
 bash scripts/setup_rtx_pro_6000.sh  # RTX Pro 6000 Blackwell (sm 12.0, CUDA 12.8 / torch 2.9.1)
@@ -171,10 +172,13 @@ augenblick/
 │   │   │   └── submodules/         # CUDA rasterizers + tetra triangulation
 │   │   ├── light_glue/        # LightGlue (submodule)
 │   │   └── pytorch3d/         # PyTorch3D (submodule)
-│   ├── pipeline/              # Legacy first-generation pipeline
 │   └── utils/
+├── baseline/                  # Meshroom benchmark wrapper
 ├── scripts/                   # Per-GPU environment installers
 ├── constraints/               # numpy-generation pins (numpy1.txt, numpy2.txt)
+├── hpg_slurm/                 # SLURM job scripts (HiPerGator)
+├── pace_slurm/                # SLURM job scripts (PACE ICE)
+├── tests/                     # Package unit tests
 └── .claude/
     ├── CLAUDE.md              # Agent orientation (succinct)
     └── MEMORY/                # Detailed codebase documentation

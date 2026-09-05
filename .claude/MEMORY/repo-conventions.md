@@ -48,11 +48,12 @@ concise and describe purpose rather than walking through behaviour — no worked
 pipeline/       Data preparation (preparation/); SfM and reconstruction moved to src/augenblick/
 src/augenblick/ The pipeline package and its `augenblick` CLI
 baseline/       Meshroom wrapper
-scripts/        Per-GPU installers (auto_setup.sh + setup_{l40s,a100,h100,b200,common}.sh)
+scripts/        Per-GPU installers (auto_setup.sh + setup_{l40s,a100,a40,h100,b200,rtx_pro_6000,common}.sh)
 constraints/    numpy-generation pip pins (numpy1.txt, numpy2.txt), selected by NUMPY_GENERATION
 src/libs/       Backends: vggt/, sugar/, 2dgs/, pgsr/, gaussian_wrapping/, light_glue/, pytorch3d/
 src/utils/      Standalone helpers (visual_util.py)
-slurm/          Cluster job scripts (see cluster-slurm.md)
+hpg_slurm/      HiPerGator job scripts (see cluster-slurm.md)
+pace_slurm/     PACE ICE job scripts, same jobs (see cluster-slurm.md)
 tests/          Package unit tests
 assets/         README result grids
 .claude/        CLAUDE.md orientation, MEMORY/ topic docs, PLANS/ landed refactor specs

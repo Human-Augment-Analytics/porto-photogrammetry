@@ -162,4 +162,5 @@ miniconda.sh
 *.ufhpc.*
 
 # SLURM job logs
-slurm/logs/
+hpg_slurm/logs/
+pace_slurm/logs/

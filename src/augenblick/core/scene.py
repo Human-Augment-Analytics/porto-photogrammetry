@@ -35,8 +35,9 @@ class Scene:
         return self.root / "sparse" / "0"
 
     def has_masks(self) -> bool:
-        """Whether the scene carries a masks/ directory."""
-        return self.masks_dir.is_dir()
+        """Whether the scene carries a non-empty masks/ directory.
+        """
+        return self.masks_dir.is_dir() and any(self.masks_dir.iterdir())
 
     def has_reconstruction(self) -> bool:
         """Whether sparse/0/ exists and is non-empty; an empty one means SfM failed."""

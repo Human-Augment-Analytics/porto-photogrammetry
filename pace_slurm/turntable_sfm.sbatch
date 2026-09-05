@@ -1,21 +1,20 @@
 #!/bin/bash
 # COLMAP -> turntable rig refinement for every scene under DATA_ROOT, one array task per scene.
 # Turntable refines an existing COLMAP scene, so the input SfM is run first if it is absent.
-# Usage: sbatch slurm/turntable_sfm.sbatch [extra turntable flags]
-# Single scene: sbatch --array=N slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
+# Usage: sbatch pace_slurm/turntable_sfm.sbatch [extra turntable flags]
+# Single scene: sbatch --array=N pace_slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
 # SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
 #SBATCH --job-name=turntable-sfm
-#SBATCH --account=arthur.porto
-#SBATCH --partition=hpg-rtx6000
+#SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=24gb
 #SBATCH --time=2:00:00
 #SBATCH --array=0-5
-#SBATCH --output=slurm/logs/%x-%A_%a.out
-#SBATCH --error=slurm/logs/%x-%A_%a.err
+#SBATCH --output=pace_slurm/logs/%x-%A_%a.out
+#SBATCH --error=pace_slurm/logs/%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
@@ -23,7 +22,7 @@
 set -euo pipefail
 
 # Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
-SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/slurm"
+SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
     exit 2
@@ -36,8 +35,6 @@ case "$SFM" in
     *) echo "ERROR: unknown SFM='$SFM' (valid: colmap, vggt, vggt_ba)" >&2; exit 2 ;;
 esac
 
-DATA_ROOT="${DATA_ROOT:-/blue/arthur.porto/data/datasets/photogrammetry/main}"
-RESULT_ROOT="${RESULT_ROOT:-/blue/arthur.porto/srizvi63.gatech/results}"
 
 # Sorted so an array index maps to the same scene across submissions.
 mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
