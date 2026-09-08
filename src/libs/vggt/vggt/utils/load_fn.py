@@ -48,14 +48,16 @@ def load_and_preprocess_images_square(image_path_list, mask_path_list=None, targ
 
         img = Image.open(image_path)
 
+        # Black, not white: downstream confidence and keypoint logic treat 0 as "nothing here".
         if img.mode == "RGBA":
-            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            background = Image.new("RGBA", img.size, (0, 0, 0, 255))
             img = Image.alpha_composite(background, img)
-        elif mask_path is not None:
-            mask = Image.open(mask_path).convert("L")
-            img = Image.composite(img, Image.new("RGB", img.size, 0), mask)
 
         img = img.convert("RGB")
+
+        # The mask is carried alongside the image, never composited into it
+        if mask_path is not None:
+            mask = Image.open(mask_path).convert("L")
 
         width, height = img.size
         max_dim = max(width, height)
@@ -150,19 +152,16 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
         # Open image
         img = Image.open(image_path)
 
-        # If there's an alpha channel, blend onto white background:
+        # Black, not white: downstream confidence and keypoint logic treat 0 as "nothing here".
         if img.mode == "RGBA":
-            # Create white background
-            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            # Alpha composite onto the white background
+            background = Image.new("RGBA", img.size, (0, 0, 0, 255))
             img = Image.alpha_composite(background, img)
 
-        elif mask_path is not None:
-            mask = Image.open(mask_path).convert("L")
-            img = Image.composite(img, Image.new("RGB", img.size, 0), mask)
-
-        # Now convert to "RGB" (this step assigns white for transparent areas)
         img = img.convert("RGB")
+
+        # The mask is carried alongside the image, never composited into it
+        if mask_path is not None:
+            mask = Image.open(mask_path).convert("L")
 
         width, height = img.size
 

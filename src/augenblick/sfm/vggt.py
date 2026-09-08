@@ -10,7 +10,6 @@ import glob
 import logging
 import os
 import random
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +22,6 @@ from augenblick.sfm.base import SfMMethod, SfMResult
 logger = logging.getLogger(__name__)
 
 
-# TODO: add support for masks
 # TODO: add iterative BA
 # TODO: add support for radial distortion, which needs extra_params
 # TODO: test with more cases
@@ -35,6 +33,9 @@ class VGGTConfig:
     """VGGT inference and optional bundle-adjustment parameters."""
 
     use_masks: bool = field(default=False, metadata={"help": "Use masks for reconstruction"})
+    mask_erode_px: int = field(default=3, metadata={
+        "help": "Shrink masks by this many pixels before keypoint filtering, dropping the "
+                "silhouette seam detectors fire on (0 disables)"})
     seed: int = field(default=42, metadata={"help": "Random seed for reproducibility"})
     use_ba: bool = field(default=False, metadata={"help": "Use BA for reconstruction"})
     max_reproj_error: float = field(default=8.0, metadata={
@@ -44,8 +45,10 @@ class VGGTConfig:
     camera_type: str = field(default="SIMPLE_PINHOLE", metadata={
         "help": "Camera type for reconstruction"})
     vis_thresh: float = field(default=0.2, metadata={"help": "Visibility threshold for tracks"})
-    query_frame_num: int = field(default=8, metadata={"help": "Number of frames to query"})
-    max_query_pts: int = field(default=4096, metadata={"help": "Maximum number of query points"})
+    query_frame_num: int = field(default=12, metadata={"help": "Number of frames to query"})
+    max_query_pts: int = field(default=4096, metadata={
+        "help": "Maximum number of query points. The BA inlier floor counts surviving tracks "
+                "per frame absolutely, so masked scenes need a large budget to clear it"})
     fine_tracking: bool = field(default=True, metadata={
         "help": "Use fine tracking (slower but more accurate)"})
     conf_thres_value: float = field(default=2.0, metadata={
@@ -275,6 +278,24 @@ class VGGTSfM(SfMMethod):
                 scale = img_load_resolution / vggt_fixed_resolution
                 shared_camera = args.shared_camera
 
+                # Built from the loader's masks, which match `images`
+                track_masks = None
+                if args.use_masks and any(m is not None for m in masks):
+                    track_masks = torch.zeros(
+                        (len(masks), img_load_resolution, img_load_resolution),
+                        dtype=torch.bool, device=device)
+                    for i, mask in enumerate(masks):
+                        if mask is None:
+                            # No mask for this frame means no constraint, not an empty frame.
+                            track_masks[i] = True
+                        else:
+                            track_masks[i] = torch.from_numpy(
+                                np.array(mask) > 0).to(device)
+
+                logger.info(
+                    f"Tracking budget: {args.max_query_pts} query pts x "
+                    f"{args.query_frame_num} frames")
+
                 with torch.cuda.amp.autocast(dtype=dtype):
                     # Predicting Tracks
                     # Using VGGSfM tracker instead of VGGT tracker for efficiency
@@ -287,11 +308,13 @@ class VGGTSfM(SfMMethod):
                         images,
                         conf=depth_conf,
                         points_3d=points_3d,
-                        masks=None,
+                        masks=track_masks,
+                        mask_erode_px=args.mask_erode_px,
                         max_query_pts=args.max_query_pts,
                         query_frame_num=args.query_frame_num,
                         keypoint_extractor="aliked+sp",
                         fine_tracking=args.fine_tracking,
+                        conf_thresh=args.conf_thres_value
                     )
 
                     torch.cuda.empty_cache()
@@ -300,7 +323,7 @@ class VGGTSfM(SfMMethod):
                 intrinsic[:, :2, :] *= scale
                 track_mask = pred_vis_scores > args.vis_thresh
 
-                # TODO: radial distortion, iterative BA, masks
+                # TODO: radial distortion, iterative BA
                 reconstruction, valid_track_mask = batch_np_matrix_to_pycolmap(
                     points_3d,
                     extrinsic,
@@ -325,7 +348,6 @@ class VGGTSfM(SfMMethod):
                 ba_time = time.time() - t0
                 logger.info(f"Tracking + bundle adjustment completed in {ba_time:.1f}s")
             else:
-                conf_thres_value = args.conf_thres_value
                 max_points_for_colmap = 100000  # randomly sample 3D points
                 shared_camera = False  # in the feedforward manner, we do not support shared camera
                 camera_type = "PINHOLE"  # in the feedforward manner, we only support PINHOLE camera
@@ -343,8 +365,7 @@ class VGGTSfM(SfMMethod):
                 # (S, H, W, 3), with x, y coordinates and frame indices
                 points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
-                conf_mask = depth_conf >= conf_thres_value
-                # at most writing 100000 3d points to colmap reconstruction object
+                conf_mask = depth_conf >= args.conf_thres_value
                 conf_mask = randomly_limit_trues(conf_mask, max_points_for_colmap)
 
                 points_3d = points_3d[conf_mask]
@@ -382,27 +403,16 @@ class VGGTSfM(SfMMethod):
             trimesh.PointCloud(points_3d, colors=points_rgb).export(
                 os.path.join(out_dir_str, "sparse/0/points.ply"))
 
-            # Copy original images to output_dir/images/
-            images_out_dir = os.path.join(out_dir_str, "images")
-            masks_out_dir = os.path.join(out_dir_str, "masks")
-            os.makedirs(images_out_dir, exist_ok=True)
-            os.makedirs(masks_out_dir, exist_ok=True)
-            n_masks = 0
-            for img_src_path in image_path_list:
-                img_stem = Path(img_src_path).stem
-                img_dst_path = os.path.join(images_out_dir, os.path.basename(img_src_path))
-                if not os.path.exists(img_dst_path):
-                    shutil.copy2(img_src_path, img_dst_path)
+            images_out_dir = output_dir / "images"
+            masks_out_dir = output_dir / "masks"
+            if not images_out_dir.exists():
+                os.symlink(scene.images_dir, images_out_dir)
+            if scene.has_masks() and not masks_out_dir.exists():
+                os.symlink(scene.masks_dir, masks_out_dir)
 
-                mask_src_path = os.path.join(mask_dir, f"{img_stem}.png")
-                if os.path.exists(mask_src_path):
-                    mask_dst_path = os.path.join(masks_out_dir, f"{img_stem}.png")
-                    if not os.path.exists(mask_dst_path):
-                        shutil.copy2(mask_src_path, mask_dst_path)
-                    n_masks += 1
-
-            logger.info(f"Copied {len(image_path_list)} images to {images_out_dir}")
-            logger.info(f"Copied {n_masks} masks to {masks_out_dir}")
+            logger.info(f"Linked {images_out_dir} -> {scene.images_dir}")
+            if masks_out_dir.is_symlink():
+                logger.info(f"Linked {masks_out_dir} -> {scene.masks_dir}")
 
             total_time = time.time() - t_start
             logger.info("=" * 60)
