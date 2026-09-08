@@ -25,6 +25,7 @@ pymcubes==0.1.6
 pycolmap-cuda12==4.1.1
 rich==15.0.0
 scikit-image
+lpips==0.1.4
 dacite==1.9.2
 numpy
 morphosource>=1.2.0

@@ -13,6 +13,7 @@ sbatch pace_slurm/vggt_sfm.sbatch
 sbatch pace_slurm/vggt_ba_sfm.sbatch
 sbatch pace_slurm/colmap_sfm.sbatch
 SFM=colmap sbatch pace_slurm/turntable_sfm.sbatch
+SFM=colmap sbatch pace_slurm/hull_sfm.sbatch
 BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch
 ```
 
@@ -20,6 +21,11 @@ BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch
 feeds it; `turntable_sfm.sbatch` takes `SFM=` too and runs that SfM first if its output is
 missing. Scenes are discovered under `DATA_ROOT` and sorted, so an array index maps to the same
 scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
+
+`hull_sfm.sbatch` carves the visual hull from the masks and writes it as the initial point
+cloud. Its output differs from the input SfM only in `sparse/0/points3D.ply`, so running
+`recon.sbatch` against both gives an initialisation ablation with poses, intrinsics and the
+training schedule held fixed. It needs masks and will refuse to run without them.
 
 For anything not covered, copy `template.sbatch` and edit its command block.
 
