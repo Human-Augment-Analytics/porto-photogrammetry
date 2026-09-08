@@ -40,6 +40,12 @@ class VGGTConfig:
     use_ba: bool = field(default=False, metadata={"help": "Use BA for reconstruction"})
     max_reproj_error: float = field(default=8.0, metadata={
         "help": "Maximum reprojection error for reconstruction"})
+    min_inlier_per_frame: int = field(default=64, metadata={
+        "help": "Surviving tracks a frame needs to take part in BA; frames below it are "
+                "dropped individually rather than aborting the reconstruction"})
+    min_valid_frames: float = field(default=0.3, metadata={
+        "help": "Fraction of frames that must clear --min_inlier_per_frame, or BA is skipped "
+                "entirely"})
     shared_camera: bool = field(default=False, metadata={
         "help": "Use shared camera for all images"})
     camera_type: str = field(default="SIMPLE_PINHOLE", metadata={
@@ -52,7 +58,9 @@ class VGGTConfig:
     fine_tracking: bool = field(default=True, metadata={
         "help": "Use fine tracking (slower but more accurate)"})
     conf_thres_value: float = field(default=2.0, metadata={
-        "help": "Confidence threshold value for depth filtering (wo BA)"})
+        "help": "Minimum VGGT depth confidence, applied in both modes: without --use_ba it "
+                "selects which depth pixels become 3D points; with --use_ba the tracker "
+                "samples the same map at each query point and drops those below it"})
 
 
 def run_VGGT(model, images, masks, dtype, resolution=518):
@@ -148,6 +156,18 @@ def rename_colmap_recons_and_rescale_camera(
             rescale_camera = False
 
     return reconstruction
+
+
+def _link_dir(src: Path, dst: Path) -> None:
+    """Symlink dst -> src, replacing a stale link left by an earlier run."""
+    # lexists, not exists: a link dangling from a moved scene still blocks os.symlink.
+    if dst.is_symlink():
+        dst.unlink()
+    elif os.path.lexists(dst):
+        logger.warning("%s exists and is not a symlink; leaving it in place", dst)
+        return
+    os.symlink(src, dst)
+    logger.info("Linked %s -> %s", dst, src)
 
 
 @register_sfm
@@ -334,6 +354,8 @@ class VGGTSfM(SfMMethod):
                     max_reproj_error=args.max_reproj_error,
                     shared_camera=shared_camera,
                     camera_type=args.camera_type,
+                    min_inlier_per_frame=args.min_inlier_per_frame,
+                    min_valid_frames=args.min_valid_frames,
                     points_rgb=points_rgb,
                 )
 
@@ -403,16 +425,9 @@ class VGGTSfM(SfMMethod):
             trimesh.PointCloud(points_3d, colors=points_rgb).export(
                 os.path.join(out_dir_str, "sparse/0/points.ply"))
 
-            images_out_dir = output_dir / "images"
-            masks_out_dir = output_dir / "masks"
-            if not images_out_dir.exists():
-                os.symlink(scene.images_dir, images_out_dir)
-            if scene.has_masks() and not masks_out_dir.exists():
-                os.symlink(scene.masks_dir, masks_out_dir)
-
-            logger.info(f"Linked {images_out_dir} -> {scene.images_dir}")
-            if masks_out_dir.is_symlink():
-                logger.info(f"Linked {masks_out_dir} -> {scene.masks_dir}")
+            _link_dir(scene.images_dir, output_dir / "images")
+            if scene.has_masks():
+                _link_dir(scene.masks_dir, output_dir / "masks")
 
             total_time = time.time() - t_start
             logger.info("=" * 60)

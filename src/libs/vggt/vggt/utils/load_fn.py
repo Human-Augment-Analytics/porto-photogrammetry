@@ -105,14 +105,20 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
 
     Args:
         image_path_list (list): List of paths to image files
-        mask_path_list (list, optional): List of paths to mask files
+        mask_path_list (list, optional): List of paths to mask files. Entries may be None for
+            images with no mask; the mask is transformed alongside its image, never composited
+            into it.
         mode (str, optional): Preprocessing mode, either "crop" or "pad".
                              - "crop" (default): Sets width to 518px and center crops height if needed.
                              - "pad": Preserves all pixels by making the largest dimension 518px
                                and padding the smaller dimension to reach a square shape.
 
     Returns:
-        torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W)
+        tuple: (
+            torch.Tensor: Batched tensor of preprocessed images with shape (N, 3, H, W),
+            list: List of mask tensors of shape (1, H, W) (or None entries), cropped and padded
+                to match the images
+        )
 
     Raises:
         ValueError: If the input list is empty or if mode is invalid
@@ -143,11 +149,10 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
     # First process all images and collect their shapes
     for i in range(len(image_path_list)):
         image_path = image_path_list[i]
+        mask = None
+        mask_path = None
         if mask_path_list is not None and i < len(mask_path_list):
             mask_path = mask_path_list[i]
-        else:
-            mask_path = None
-            mask = None
 
         # Open image
         img = Image.open(image_path)
@@ -181,16 +186,17 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
 
         # Resize with new dimensions (width, height)
         img = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
+        img = to_tensor(img)  # Convert to tensor (0, 1)
         if mask is not None:
             mask = mask.resize((new_width, new_height), Image.Resampling.NEAREST)
-        img = to_tensor(img)  # Convert to tensor (0, 1)
+            mask = to_tensor(mask)  # [1, H, W], so it crops and pads exactly like the image
 
         # Center crop height if it's larger than 518 (only in crop mode)
         if mode == "crop" and new_height > target_size:
             start_y = (new_height - target_size) // 2
             img = img[:, start_y : start_y + target_size, :]
             if mask is not None:
-                mask = mask[:, start_y : start_y + target_size]
+                mask = mask[:, start_y : start_y + target_size, :]
 
         # For pad mode, pad to make a square of target_size x target_size
         if mode == "pad":
@@ -203,10 +209,12 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
                 pad_left = w_padding // 2
                 pad_right = w_padding - pad_left
 
+                padding = (pad_left, pad_right, pad_top, pad_bottom)
                 # Pad with white (value=1.0)
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-                )
+                img = torch.nn.functional.pad(img, padding, mode="constant", value=1.0)
+                if mask is not None:
+                    # Padding is background, so the mask pads with 0, not the image's 1.0.
+                    mask = torch.nn.functional.pad(mask, padding, mode="constant", value=0.0)
 
         shapes.add((img.shape[1], img.shape[2]))
         images.append(img)
@@ -222,7 +230,8 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
 
         # Pad images if necessary
         padded_images = []
-        for img in images:
+        padded_masks = []
+        for img, mask in zip(images, masks):
             h_padding = max_height - img.shape[1]
             w_padding = max_width - img.shape[2]
 
@@ -232,11 +241,14 @@ def load_and_preprocess_images(image_path_list, mask_path_list=None, mode="crop"
                 pad_left = w_padding // 2
                 pad_right = w_padding - pad_left
 
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-                )
+                padding = (pad_left, pad_right, pad_top, pad_bottom)
+                img = torch.nn.functional.pad(img, padding, mode="constant", value=1.0)
+                if mask is not None:
+                    mask = torch.nn.functional.pad(mask, padding, mode="constant", value=0.0)
             padded_images.append(img)
+            padded_masks.append(mask)
         images = padded_images
+        masks = padded_masks
 
     images = torch.stack(images)  # concatenate images
 

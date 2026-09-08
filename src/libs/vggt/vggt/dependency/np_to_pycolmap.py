@@ -22,7 +22,7 @@ def batch_np_matrix_to_pycolmap(
     camera_type="SIMPLE_PINHOLE",
     extra_params=None,
     min_inlier_per_frame=64,
-    min_valid_frames=3,
+    min_valid_frames=0.3,
     points_rgb=None,
 ):
     """
@@ -71,14 +71,17 @@ def batch_np_matrix_to_pycolmap(
     inliers_per_frame = masks.sum(1)
     starved = inliers_per_frame < min_inlier_per_frame
     if starved.any():
-        if (~starved).sum() < min_valid_frames:
+        # min_valid_frames is a fraction of the frame count, so the floor scales with the scene.
+        required = int(np.ceil(min_valid_frames * N))
+        surviving = int((~starved).sum())
+        if surviving < required:
             print(
-                f"Only {int((~starved).sum())} frame(s) reach {min_inlier_per_frame} inliers, "
-                f"need {min_valid_frames}; skip BA."
+                f"Only {surviving}/{N} frame(s) reach {min_inlier_per_frame} inliers, "
+                f"need {required} ({min_valid_frames:.0%}); skip BA."
             )
             return None, None
         print(
-            f"Dropping {int(starved.sum())}/{len(starved)} frame(s) below "
+            f"Dropping {int(starved.sum())}/{N} frame(s) below "
             f"{min_inlier_per_frame} inliers (min was {int(inliers_per_frame.min())})."
         )
         # Zeroing the row keeps frame indexing intact; the frame registers with no observations.
