@@ -70,6 +70,33 @@ def sanitize(name: str) -> str:
     return cleaned.strip("._") or "unknown"
 
 
+def read_specimen_file(path: Path) -> List[str]:
+    """
+    Read specimen ids from a text file, one per line.
+
+    Blank lines and '#' comments are skipped, as is anything after an id on its
+    line, so a list can carry notes alongside the ids. Order is preserved and
+    duplicates dropped, since the ids drive the download order.
+
+    Args:
+        path: Text file of specimen ids.
+
+    Returns:
+        The ids, de-duplicated, in file order.
+    """
+    ids: List[str] = []
+    seen = set()
+    for line in path.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        specimen_id = line.split()[0]
+        if specimen_id not in seen:
+            seen.add(specimen_id)
+            ids.append(specimen_id)
+    return ids
+
+
 def human_size(num_bytes: int) -> str:
     """Format a byte count for logging."""
     size = float(num_bytes or 0)
@@ -423,6 +450,10 @@ Examples:
   python scripts/download_morphosource_project.py --specimen 000833233 000855245 \\
       --kinds images lowpoly highpoly
 
+  # A list of specimens from a file, one id per line
+  python scripts/download_morphosource_project.py \\
+      --specimen-file /blue/arthur.porto/srizvi63.gatech/neurips_dataset_specimens.txt
+
   # The whole project (~869 GB for all three kinds)
   python scripts/download_morphosource_project.py --all-specimens --kinds images lowpoly highpoly
         """
@@ -441,6 +472,9 @@ Examples:
                         help="Take every eligible specimen instead of sampling")
     parser.add_argument("--specimen", nargs="+", default=None, metavar="ID",
                         help="Explicit physical object ids; bypasses sampling")
+    parser.add_argument("--specimen-file", type=Path, default=None, metavar="PATH",
+                        help="Text file of physical object ids, one per line ('#' comments "
+                             "allowed); combines with --specimen and bypasses sampling")
     parser.add_argument("--dry-run", action="store_true",
                         help="Write the manifest and print sizes, download nothing")
     parser.add_argument("--extract", action="store_true",
@@ -453,6 +487,20 @@ Examples:
                         help="MorphoSource use categories (default: Research)")
 
     args = parser.parse_args()
+
+    explicit = list(args.specimen or [])
+    if args.specimen_file:
+        if not args.specimen_file.is_file():
+            logger.error(f"Specimen file not found: {args.specimen_file}")
+            return 1
+        from_file = read_specimen_file(args.specimen_file)
+        if not from_file:
+            logger.error(f"No specimen ids in {args.specimen_file}")
+            return 1
+        logger.info(f"Read {len(from_file)} specimen id(s) from {args.specimen_file}")
+        named = set(explicit)
+        explicit += [s for s in from_file if s not in named]
+    explicit = explicit or None
 
     output_dir = args.output_dir or Path("data/morphosource") / args.project_id
 
@@ -474,7 +522,7 @@ Examples:
 
     kinds = classify_media(media_list)
     specimens = group_by_specimen(media_list, kinds)
-    selected = select_specimens(specimens, args.kinds, args.specimen,
+    selected = select_specimens(specimens, args.kinds, explicit,
                                 args.all_specimens, args.num_specimens, args.seed)
     if not selected:
         logger.error("No specimens matched the requested kinds")
@@ -530,7 +578,7 @@ Examples:
         "kinds": args.kinds,
         "seed": args.seed,
         "num_specimens": len(selected),
-        "selection": "explicit" if args.specimen else ("all" if args.all_specimens else "sampled"),
+        "selection": "explicit" if explicit else ("all" if args.all_specimens else "sampled"),
         "total_bytes": total_bytes,
         "specimens": [],
     }
