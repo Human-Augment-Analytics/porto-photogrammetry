@@ -34,6 +34,11 @@ class Scene:
         """Directory holding the COLMAP sparse model."""
         return self.root / "sparse" / "0"
 
+    @property
+    def model_dir(self) -> Path:
+        """The COLMAP model, allowing for the flattened sparse/ layout PGSR prepares."""
+        return self.sparse_dir if self.sparse_dir.is_dir() else self.root / "sparse"
+
     def has_masks(self) -> bool:
         """Whether the scene carries a non-empty masks/ directory.
         """

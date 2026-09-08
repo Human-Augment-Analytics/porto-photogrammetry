@@ -1,7 +1,7 @@
 """Shared shape of the reconstruction backends: validate, prepare, run staged subprocesses."""
 import logging
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
@@ -15,6 +15,26 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIBS_DIR = REPO_ROOT / "src" / "libs"
+
+
+@dataclass(frozen=True)
+class EvalParams:
+    """Held-out-view evaluation, inherited by every backend config that supports it.
+
+    A base class rather than a duck-typed field name, so eval_enabled has a contract to
+    check instead of probing for an attribute that may or may not exist.
+    """
+
+    eval: bool = field(default=False, metadata={
+        "help": "Hold out views for novel-view evaluation, from the scene's split.json"})
+
+
+@dataclass(frozen=True)
+class ResolutionParams:
+    """Input downscale, for the backends that forward -r to their training script."""
+
+    resolution: int = field(default=-1, metadata={
+        "short": "-r", "help": "Input downscale factor; -1 caps the long side at 1600 px"})
 
 
 @dataclass
@@ -56,8 +76,8 @@ class ReconstructionMethod(Method):
 
     @property
     def eval_enabled(self) -> bool:
-        """Whether this run holds out views; backends opt in by declaring an eval config field."""
-        return bool(getattr(self.config, "eval", False))
+        """Whether this run holds out views; backends opt in by inheriting EvalParams."""
+        return isinstance(self.config, EvalParams) and self.config.eval
 
     def test_renders_root(self, output_dir: Path) -> Path | None:
         """Directory under which this backend writes its ours_<iter>/{renders,gt} exports.

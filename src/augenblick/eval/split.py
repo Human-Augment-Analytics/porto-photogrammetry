@@ -13,9 +13,11 @@ DEFAULT_HOLDOUT = 8
 
 
 def sparse_dir(scene_root: Path) -> Path:
-    """Locate the COLMAP model, which PGSR flattens from sparse/0/ into sparse/."""
-    nested = scene_root / "sparse" / "0"
-    return nested if nested.is_dir() else scene_root / "sparse"
+    """Locate the COLMAP model; a function for callers holding only a path."""
+    # Imported here so the module stays importable from core code without a cycle.
+    from augenblick.core.scene import Scene
+
+    return Scene(scene_root).model_dir
 
 
 def registered_stems(model_dir: Path) -> list[str]:

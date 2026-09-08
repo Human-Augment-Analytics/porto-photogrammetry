@@ -8,7 +8,7 @@ from typing import ClassVar, Optional
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, EvalParams, Stage, SubprocessBackend
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +45,11 @@ DEFAULT_TEXTURE_SH_DEGREE = 0
 
 
 @dataclass(frozen=True)
-class GWConfig:
+class GWConfig(EvalParams):
     """Training, extraction, and texture-refinement parameters for Gaussian Wrapping."""
 
     resolution: Optional[int] = field(default=None, metadata={
         "short": "-r", "help": "Image resolution override forwarded to all stages"})
-    eval: bool = field(default=False, metadata={
-        "help": "Hold out views for novel-view evaluation, from the scene's split.json. "
-                "Disables exposure compensation, which cannot be evaluated on unseen views."})
     iterations: int = field(default=30_000, metadata={"help": "Training iterations"})
     sh_degree: int = field(default=3, metadata={"help": "Max spherical harmonics degree"})
     max_gaussians: int = field(default=DEFAULT_MAX_GAUSSIANS, metadata={

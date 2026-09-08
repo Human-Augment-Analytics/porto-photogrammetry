@@ -7,7 +7,8 @@ from typing import ClassVar
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import (
+    LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend)
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ RENDER_SCRIPT = TWODGS_DIR / "render.py"
 
 
 @dataclass(frozen=True)
-class TwoDGSConfig:
+class TwoDGSConfig(EvalParams, ResolutionParams):
     """Training and mesh-extraction parameters forwarded to 2DGS."""
 
     iterations: int = field(default=30_000, metadata={"help": "Training iterations"})
@@ -42,10 +43,6 @@ class TwoDGSConfig:
         "help": "Use unbounded mesh extraction (marching cubes)"})
     mesh_res: int = field(default=4096, metadata={"help": "Resolution for unbounded mesh extraction"})
     skip_mesh: bool = field(default=False, metadata={"help": "Skip mesh extraction (render only)"})
-    eval: bool = field(default=False, metadata={
-        "help": "Hold out views for novel-view evaluation, from the scene's split.json"})
-    resolution: int = field(default=-1, metadata={
-        "short": "-r", "help": "Input downscale factor; -1 caps the long side at 1600 px"})
     skip_train_export: bool = field(default=False, metadata={
         "help": "Skip writing per-training-view PNGs; mesh extraction is unaffected"})
 

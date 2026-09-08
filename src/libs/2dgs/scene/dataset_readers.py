@@ -164,7 +164,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             train_list, test_list = meta["train"], meta["test"]
             print(f"split.json: {len(train_list)} train, {len(test_list)} test")
 
-    if train_list is not None:
+    if eval and train_list is not None:
         train_cam_infos = [c for c in cam_infos if c.image_name in train_list]
         test_cam_infos = [c for c in cam_infos if c.image_name in test_list]
     elif eval:

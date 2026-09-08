@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 RENDERS_SUBDIR = "renders"
 GT_SUBDIR = "gt"
 METRICS_FILENAME = "nvs_metrics.json"
+METRIC_DOMAIN = "mask"
 
 
 def find_test_dir(test_root: Path, iteration: int | None = None) -> Path:
@@ -47,7 +48,10 @@ def resolve_test_stems(scene: Scene) -> list[str]:
     """Return the held-out image stems, from split.json when present, else from the model."""
     split = read_split(scene.root)
     if split is not None:
-        return split["test"]
+        # The readers sort their cameras by image name, and positional renders (00000.png) are
+        # indexed against that order, so a hand-authored split.json in file order would
+        # mislabel every view and mask it with the wrong silhouette.
+        return sorted(split["test"])
     # Models trained before split.json existed fell back to the llffhold rule, which
     # build_split reproduces, so those runs stay scoreable.
     logger.info(f"No split.json in {scene.root}; deriving the held-out set from the model")
@@ -131,7 +135,7 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
     lpips = metrics.Lpips()
     pairs = pair_views(test_dir, test_stems)
 
-    views, masked = [], 0
+    views, skipped, masked = [], [], 0
     with torch.no_grad():
         for stem, render_path, gt_path in pairs:
             pred = _load_rgb(render_path, device)
@@ -142,17 +146,32 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
                     f"{tuple(truth.shape)}")
 
             mask = _load_mask(masks_dir, stem, pred.shape[1], pred.shape[2], device)
+            fill = None
+            if mask is not None and float(mask.sum()) == 0.0:
+                # No domain to score over. The masked reductions would divide by a clamped
+                # denominator and report a perfect match, silently lifting the mean.
+                logger.warning(f"{stem}: mask is empty, skipping this view")
+                skipped.append(stem)
+                del pred, truth, mask
+                continue
             if mask is not None:
+                # Composite both to a common background so windows straddling the silhouette
+                # see the same thing, then hand the mask on to restrict each metric's domain.
                 pred, truth = pred * mask, truth * mask
+                fill = float(mask.mean())
                 masked += 1
 
             views.append({
                 "image": stem,
-                "psnr": metrics.psnr(pred, truth),
-                "ssim": metrics.ssim(pred, truth),
-                "lpips": lpips(pred, truth),
+                "psnr": metrics.psnr(pred, truth, mask),
+                "ssim": metrics.ssim(pred, truth, mask),
+                "lpips": lpips(pred, truth, mask),
+                "mask_fill": fill,
             })
             del pred, truth, mask
+
+    if not views:
+        raise SceneError(f"no scoreable views in {test_dir}; every mask was empty")
 
     result = {
         **(extra or {}),
@@ -160,6 +179,10 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
         "iteration": int(test_dir.name.split("_")[-1]) if "_" in test_dir.name else None,
         "n_test": len(views),
         "n_masked": masked,
+        "n_skipped": len(skipped),
+        "skipped": skipped,
+        # Records which convention produced this file; see the module docstring.
+        "metric_domain": METRIC_DOMAIN,
         "psnr": float(np.mean([v["psnr"] for v in views])),
         "ssim": float(np.mean([v["ssim"] for v in views])),
         "lpips": float(np.mean([v["lpips"] for v in views])),
