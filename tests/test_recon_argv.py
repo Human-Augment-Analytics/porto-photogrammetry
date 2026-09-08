@@ -213,3 +213,63 @@ def test_gw_extract_iteration_defaults_to_iterations():
 def test_gw_uses_no_cwd():
     assert GWBackend.use_cwd is False
     assert TwoDGSBackend.use_cwd is True
+
+
+def test_2dgs_eval_renders_held_out_views():
+    train, render = TwoDGSBackend(TwoDGSConfig(eval=True)).stages(SCENE, OUT)
+    assert "--eval" in train.cmd
+    assert "--eval" in render.cmd
+    assert "--skip_test" not in render.cmd
+
+
+def test_pgsr_eval_renders_held_out_views():
+    train, render = PgsrBackend(PgsrConfig(eval=True)).stages(SCENE, OUT)
+    assert "--eval" in train.cmd
+    assert "--skip_test" not in render.cmd
+
+
+def test_pgsr_resolution_reaches_training_only():
+    train, render = PgsrBackend(PgsrConfig(resolution=2)).stages(SCENE, OUT)
+    assert train.cmd[-2:] == ["-r", "2"]
+    # render.py reads the resolution back from the model's cfg_args, as it does the scene path.
+    assert "-r" not in render.cmd
+
+
+def test_gw_eval_disables_exposure_and_renders_before_extraction():
+    stages = GWBackend(GWConfig(eval=True)).stages(SCENE, OUT)
+    assert [s.name for s in stages] == [
+        "Training", "Held-out rendering", "Mesh extraction", "Texture refinement"]
+
+    train = stages[0].cmd
+    # Exposure compensation fits one exposure per training camera, so it cannot be evaluated.
+    assert "--no-exposure_compensation" in train
+    assert "--exposure_compensation" not in train
+    assert "--eval" in train
+
+    assert stages[1].cmd == [
+        sys.executable, str(LIBS_DIR / "gaussian_wrapping" / "render.py"),
+        "--rasterizer", "ours",
+        "-s", "/scene", "-m", "/out",
+        "--iteration", "30000",
+        "--eval",
+        "--skip_train",
+    ]
+
+
+def test_gw_keeps_exposure_compensation_when_not_evaluating():
+    train, _, _ = GWBackend(GWConfig()).stages(SCENE, OUT)
+    assert "--exposure_compensation" in train.cmd
+    assert "--no-exposure_compensation" not in train.cmd
+
+
+def test_eval_enabled_tracks_the_config_field():
+    assert TwoDGSBackend(TwoDGSConfig(eval=True)).eval_enabled is True
+    assert TwoDGSBackend(TwoDGSConfig()).eval_enabled is False
+    # SuGaR declares no eval field, so it can never be asked for held-out metrics.
+    assert SugarBackend(SugarConfig()).eval_enabled is False
+
+
+def test_test_renders_root_is_the_shared_3dgs_layout():
+    for backend in (TwoDGSBackend(TwoDGSConfig()), PgsrBackend(PgsrConfig()),
+                    GWBackend(GWConfig())):
+        assert backend.test_renders_root(OUT) == OUT / "test"
