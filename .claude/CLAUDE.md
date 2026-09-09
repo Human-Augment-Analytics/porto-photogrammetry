@@ -52,7 +52,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 |-------|---------|
 | Data acquisition | `scripts/download_morphosource_project.py` (MorphoSource project 000381689) |
 | Data preparation | `pipeline/preparation/prepare_uf_dataset.py` |
-| SfM | `augenblick sfm {vggt,colmap,turntable}` (VGGT takes `--use_ba`) |
+| SfM | `augenblick sfm {vggt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
 | Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
 

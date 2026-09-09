@@ -9,15 +9,51 @@ import numpy as np
 from .vggsfm_utils import *
 
 
+def _erode_masks(masks, erode_px, chunk=16):
+    """Shrink foreground masks by erode_px so the silhouette seam is excluded.
+
+    Pooled `chunk` frames at a time: the float copies max_pool2d needs are 8x the size of the
+    bool mask stack, which runs to gigabytes of VRAM on a scene with a few hundred frames.
+    """
+    if masks is None or erode_px <= 0:
+        return masks
+
+    kernel = 2 * int(erode_px) + 1
+    eroded = torch.empty(masks.shape, dtype=torch.bool, device=masks.device)
+    for start in range(0, masks.shape[0], chunk):
+        block = slice(start, start + chunk)
+        # Eroding foreground == dilating background, and max_pool is a dilation.
+        background = (masks[block] <= 0).float()[:, None]
+        dilated = torch.nn.functional.max_pool2d(
+            background, kernel_size=kernel, stride=1, padding=int(erode_px)
+        )
+        eroded[block] = dilated[:, 0] < 0.5
+    return eroded
+
+
+def _mask_valid_at(masks, query_index, query_points, width):
+    """Boolean per query point: True where it falls on the frame's foreground."""
+    frame_mask = masks[query_index]
+    scale = frame_mask.shape[-1] / width
+
+    xy = (query_points.squeeze(0) * scale).round().long()
+    xy[:, 0] = xy[:, 0].clamp(0, frame_mask.shape[-1] - 1)
+    xy[:, 1] = xy[:, 1].clamp(0, frame_mask.shape[-2] - 1)
+
+    return (frame_mask[xy[:, 1], xy[:, 0]] > 0).to(query_points.device)
+
+
 def predict_tracks(
     images,
     conf=None,
     points_3d=None,
     masks=None,
+    mask_erode_px=0,
     max_query_pts=2048,
     query_frame_num=5,
     keypoint_extractor="aliked+sp",
     max_points_num=163840,
+    conf_thresh=1.2,
     fine_tracking=True,
     complete_non_vis=True,
 ):
@@ -25,7 +61,6 @@ def predict_tracks(
     Predict tracks for the given images and masks.
 
     TODO: support non-square images
-    TODO: support masks
 
 
     This function predicts the tracks for the given images and masks using the specified query method
@@ -35,7 +70,10 @@ def predict_tracks(
         images: Tensor of shape [S, 3, H, W] containing the input images.
         conf: Tensor of shape [S, 1, H, W] containing the confidence scores. Default is None.
         points_3d: Tensor containing 3D points. Default is None.
-        masks: Optional tensor of shape [S, 1, H, W] containing masks. Default is None.
+        masks: Optional foreground masks of shape [S, H, W] at the resolution of `images`,
+            nonzero on the subject. Query points landing on background are dropped. Default is None.
+        mask_erode_px: Radius in pixels to shrink `masks` by before filtering, excluding the
+            silhouette seam that detectors fire on. 0 disables. Default is 0.
         max_query_pts: Maximum number of query points. Default is 2048.
         query_frame_num: Number of query frames to use. Default is 5.
         keypoint_extractor: Method for keypoint extraction. Default is "aliked+sp".
@@ -63,7 +101,8 @@ def predict_tracks(
         query_frame_indexes.remove(0)
     query_frame_indexes = [0, *query_frame_indexes]
 
-    # TODO: add the functionality to handle the masks
+    masks = _erode_masks(masks, mask_erode_px)
+
     keypoint_extractors = initialize_feature_extractors(
         max_query_pts, extractor_method=keypoint_extractor, device=device
     )
@@ -92,6 +131,8 @@ def predict_tracks(
             max_points_num,
             fine_tracking,
             device,
+            masks,
+            conf_thresh
         )
 
         pred_tracks.append(pred_track)
@@ -118,6 +159,8 @@ def predict_tracks(
             min_vis=500,
             non_vis_thresh=0.1,
             device=device,
+            masks=masks,
+            conf_thresh=conf_thresh,
         )
 
     pred_tracks = np.concatenate(pred_tracks, axis=1)
@@ -143,6 +186,8 @@ def _forward_on_query(
     max_points_num,
     fine_tracking,
     device,
+    masks=None,
+    conf_thresh=1.2
 ):
     """
     Process a single query frame for track prediction.
@@ -158,6 +203,8 @@ def _forward_on_query(
         max_points_num: Maximum number of points to process at once
         fine_tracking: Whether to use fine tracking
         device: Device to use for computation
+        masks: Optional eroded foreground masks [S, H, W]; background query points are dropped.
+        conf_thresh: Confidence floor for query points, sampled from `conf` at each keypoint.
 
     Returns:
         pred_track: Predicted tracks
@@ -170,6 +217,13 @@ def _forward_on_query(
 
     query_image = images[query_index]
     query_points = extract_keypoints(query_image, keypoint_extractors, round_keypoints=False)
+
+    # Applied before the shuffle and chunking below
+    if masks is not None:
+        keep = _mask_valid_at(masks, query_index, query_points, width)
+        if keep.any():
+            query_points = query_points[:, keep]
+
     query_points = query_points[:, torch.randperm(query_points.shape[1], device=device)]
 
     # Extract the color at the keypoint locations
@@ -190,9 +244,7 @@ def _forward_on_query(
         pred_conf = conf[query_index][query_points_scaled[:, 1], query_points_scaled[:, 0]]
         pred_point_3d = points_3d[query_index][query_points_scaled[:, 1], query_points_scaled[:, 0]]
 
-        # heuristic to remove low confidence points
-        # should I export this as an input parameter?
-        valid_mask = pred_conf > 1.2
+        valid_mask = pred_conf > conf_thresh
         if valid_mask.sum() > 512:
             query_points = query_points[:, valid_mask]  # Make sure shape is compatible
             pred_conf = pred_conf[valid_mask]
@@ -247,6 +299,8 @@ def _augment_non_visible_frames(
     min_vis: int = 500,
     non_vis_thresh: float = 0.1,
     device: torch.device = None,
+    masks=None,
+    conf_thresh=1.2
 ):
     """
     Augment tracking for frames with insufficient visibility.
@@ -268,6 +322,8 @@ def _augment_non_visible_frames(
         min_vis: Minimum visibility threshold
         non_vis_thresh: Non-visibility threshold
         device: Device to use for computation
+        masks: Optional eroded foreground masks [S, H, W]; background query points are dropped.
+        conf_thresh: Confidence floor for query points, forwarded to _forward_on_query.
 
     Returns:
         Updated pred_tracks, pred_vis_scores, pred_confs, pred_points_3d, and pred_colors lists.
@@ -313,6 +369,8 @@ def _augment_non_visible_frames(
                 max_points_num,
                 fine_tracking,
                 device,
+                masks,
+                conf_thresh
             )
             pred_tracks.append(new_track)
             pred_vis_scores.append(new_vis)

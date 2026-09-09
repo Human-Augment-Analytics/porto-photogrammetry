@@ -18,24 +18,44 @@ Splits a flat directory of mixed images and masks (`<stem>.JPG` + `<stem>.jpg.ma
 augenblick sfm vggt \
     --input_dir <dir>            \  # must contain images/
     --output_dir <dir>           \
-    [--use_masks] [--seed 42]    \
-    [--conf_thres_value 2.0]     \  # depth-confidence threshold, no-BA mode
+    [--use_masks] [--mask_erode_px 3] [--seed 42] \
+    [--conf_thres_value 2.0]     \  # VGGT depth-confidence floor, both modes
     [--use_ba]                   \  # VGGSfM tracker + pycolmap BA
     [--shared_camera] [--camera_type SIMPLE_PINHOLE] \
     [--max_reproj_error 8.0] [--vis_thresh 0.2] \
-    [--query_frame_num 8] [--max_query_pts 4096] [--fine_tracking]
+    [--min_inlier_per_frame 64] [--min_valid_frames 0.3] \  # BA inlier floors
+    [--query_frame_num 12] [--max_query_pts 4096] [--fine_tracking]
 ```
 
-Runs VGGT inference, writes `sparse/0/`, copies images, exports `points.ply`. Masks are always
-copied to `<output>/masks/` when `<input>/masks/` exists — `--use_masks` only controls whether
-masks weight the depth confidence. Logs per-stage runtimes (model load, inference, tracking+BA)
-and a total.
+Runs VGGT inference, writes `sparse/0/`, exports `points.ply`, and **symlinks** `images/` (plus
+`masks/`, when the input has them) into the output rather than copying — so an output scene breaks
+if its input moves. Logs per-stage runtimes (model load, inference, tracking+BA) and a total.
+
+`--use_masks` does two things: masks zero VGGT's `depth_conf` outside the subject in both modes,
+and under `--use_ba` they also filter the tracker's query points, dropping any that land on
+background. `mask_erode_px` (default 3) shrinks the foreground first, so detectors firing on the
+silhouette seam do not seed tracks that drift onto the turntable. A frame with no mask is
+unconstrained, not empty. Loaders never composite masks into the image; RGBA inputs flatten onto
+black — 0 reads as "nothing here" downstream — masked or not.
 
 - **No BA (default):** VGGT depth + camera predictions directly; filter by `conf_thres_value`,
   random-subsample to 100k points, write PINHOLE cameras at 518 px, then rescale to original
   resolution.
 - **With `--use_ba`:** VGGSfM tracker for correspondences, then `pycolmap.bundle_adjustment()`.
   Operates at 1024 px internally; supports SIMPLE_PINHOLE and shared-camera modes.
+
+`conf_thres_value` is one floor on one quantity — VGGT's `depth_conf` map — read in both modes:
+without BA it selects which depth pixels become 3D points; with BA the tracker samples the same
+map at each query point and drops the ones below it. Two traps: the BA-path filter is skipped
+entirely unless more than 512 query points clear it, so a low-confidence frame keeps all of them;
+and it replaced a hardcoded 1.2, so BA runs predating that were filtered more loosely and are not
+comparable to ones at the 2.0 default.
+
+BA drops a frame with fewer than `min_inlier_per_frame` surviving tracks instead of aborting, and
+skips BA outright unless `min_valid_frames` — a *fraction* of the frame count, not a count — still
+clear that floor. Masking starves frames, so these are the knobs to reach for when
+`--use_masks --use_ba` produces nothing. A dropped frame still lands in `sparse/0/` at its raw
+VGGT pose with no observations, so `num_reg_images()` counts it.
 
 README's benchmarked BA invocation overrides the defaults:
 `--use_ba --shared_camera --max_reproj_error 32 --max_query_pts 1048576 --query_frame_num 8`.

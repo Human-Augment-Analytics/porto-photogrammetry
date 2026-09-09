@@ -22,6 +22,7 @@ def batch_np_matrix_to_pycolmap(
     camera_type="SIMPLE_PINHOLE",
     extra_params=None,
     min_inlier_per_frame=64,
+    min_valid_frames=0.3,
     points_rgb=None,
 ):
     """
@@ -66,9 +67,26 @@ def batch_np_matrix_to_pycolmap(
 
     assert masks is not None
 
-    if masks.sum(1).min() < min_inlier_per_frame:
-        print(f"Not enough inliers per frame, skip BA.")
-        return None, None
+    # Drop starved frames rather than abandoning the reconstruction
+    inliers_per_frame = masks.sum(1)
+    starved = inliers_per_frame < min_inlier_per_frame
+    if starved.any():
+        # min_valid_frames is a fraction of the frame count, so the floor scales with the scene.
+        required = int(np.ceil(min_valid_frames * N))
+        surviving = int((~starved).sum())
+        if surviving < required:
+            print(
+                f"Only {surviving}/{N} frame(s) reach {min_inlier_per_frame} inliers, "
+                f"need {required} ({min_valid_frames:.0%}); skip BA."
+            )
+            return None, None
+        print(
+            f"Dropping {int(starved.sum())}/{N} frame(s) below "
+            f"{min_inlier_per_frame} inliers (min was {int(inliers_per_frame.min())})."
+        )
+        # Zeroing the row keeps frame indexing intact; the frame registers with no observations.
+        masks = masks.copy()
+        masks[starved] = False
 
     # Reconstruction object, following the format of PyCOLMAP/COLMAP
     reconstruction = pycolmap.Reconstruction()
