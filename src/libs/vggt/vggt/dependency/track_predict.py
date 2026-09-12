@@ -9,18 +9,26 @@ import numpy as np
 from .vggsfm_utils import *
 
 
-def _erode_masks(masks, erode_px):
-    """Shrink foreground masks by erode_px so the silhouette seam is excluded."""
+def _erode_masks(masks, erode_px, chunk=16):
+    """Shrink foreground masks by erode_px so the silhouette seam is excluded.
+
+    Pooled `chunk` frames at a time: the float copies max_pool2d needs are 8x the size of the
+    bool mask stack, which runs to gigabytes of VRAM on a scene with a few hundred frames.
+    """
     if masks is None or erode_px <= 0:
         return masks
 
-    # Eroding foreground == dilating background, and max_pool is a dilation.
-    fg = (masks > 0).float()[:, None]
     kernel = 2 * int(erode_px) + 1
-    eroded = 1.0 - torch.nn.functional.max_pool2d(
-        1.0 - fg, kernel_size=kernel, stride=1, padding=int(erode_px)
-    )
-    return eroded[:, 0] > 0.5
+    eroded = torch.empty(masks.shape, dtype=torch.bool, device=masks.device)
+    for start in range(0, masks.shape[0], chunk):
+        block = slice(start, start + chunk)
+        # Eroding foreground == dilating background, and max_pool is a dilation.
+        background = (masks[block] <= 0).float()[:, None]
+        dilated = torch.nn.functional.max_pool2d(
+            background, kernel_size=kernel, stride=1, padding=int(erode_px)
+        )
+        eroded[block] = dilated[:, 0] < 0.5
+    return eroded
 
 
 def _mask_valid_at(masks, query_index, query_points, width):
@@ -152,6 +160,7 @@ def predict_tracks(
             non_vis_thresh=0.1,
             device=device,
             masks=masks,
+            conf_thresh=conf_thresh,
         )
 
     pred_tracks = np.concatenate(pred_tracks, axis=1)
@@ -195,6 +204,7 @@ def _forward_on_query(
         fine_tracking: Whether to use fine tracking
         device: Device to use for computation
         masks: Optional eroded foreground masks [S, H, W]; background query points are dropped.
+        conf_thresh: Confidence floor for query points, sampled from `conf` at each keypoint.
 
     Returns:
         pred_track: Predicted tracks
@@ -312,6 +322,8 @@ def _augment_non_visible_frames(
         min_vis: Minimum visibility threshold
         non_vis_thresh: Non-visibility threshold
         device: Device to use for computation
+        masks: Optional eroded foreground masks [S, H, W]; background query points are dropped.
+        conf_thresh: Confidence floor for query points, forwarded to _forward_on_query.
 
     Returns:
         Updated pred_tracks, pred_vis_scores, pred_confs, pred_points_3d, and pred_colors lists.

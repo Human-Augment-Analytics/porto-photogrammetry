@@ -28,9 +28,10 @@ installed editable from `src/libs/vggt` (package root), importable package is `s
 **`load_fn.py`**
 - `load_and_preprocess_images_square()` — main pipeline loader. Square-pads to `max(W,H)`,
   resizes to `target_size` (default 1024). Returns images `[N, 3, T, T]`,
-  `original_coords [N, 6]` (x1, y1, x2, y2, W, H for undoing the pad), and transformed masks.
-  Optionally composites masks onto images (zeroes background).
-- `load_and_preprocess_images()` — simpler `crop`/`pad` loader at 518 px, used by the demo.
+  `original_coords [N, 6]` (x1, y1, x2, y2, W, H for undoing the pad), and transformed **PIL**
+  masks. Masks ride alongside the image, never composited into it.
+- `load_and_preprocess_images()` — simpler `crop`/`pad` loader at 518 px. No in-repo callers;
+  returns **tensor** masks `[1, H, W]`, unlike the square loader's PIL ones.
 
 **`pose_enc.py`**
 - `pose_encoding_to_extri_intri()` — `[B, S, 9]` → extrinsic `[B, S, 3, 4]` + intrinsic
@@ -46,10 +47,19 @@ installed editable from `src/libs/vggt` (package root), importable package is `s
 - `randomly_limit_trues()` — subsample True entries of a boolean mask to a budget
 - `create_pixel_coordinate_grid()` — `[S, H, W, 3]` grid of (x, y, frame_idx)
 
+## Tracking (`src/libs/vggt/vggt/dependency/track_predict.py`)
+
+- `predict_tracks()` — VGGSfM tracker over the query frames. `masks [S, H, W]` at the loader's
+  resolution drop background query points; `_erode_masks` shrinks them first as a chunked
+  `max_pool2d` dilation of the background. `conf_thresh` floors query-point confidence, but only
+  bites when more than 512 points clear it.
+
 ## COLMAP conversion (`src/libs/vggt/vggt/dependency/np_to_pycolmap.py`)
 
 - `batch_np_matrix_to_pycolmap()` — full conversion **with** tracks, used with BA. Applies
-  reprojection-error filtering, builds proper Point2D↔Point3D associations.
+  reprojection-error filtering, builds proper Point2D↔Point3D associations. Frames under
+  `min_inlier_per_frame` are dropped individually (mask row zeroed) and still register with no
+  observations; BA is skipped outright unless `min_valid_frames` (a *fraction*) clear the floor.
 - `batch_np_matrix_to_pycolmap_wo_track()` — lightweight, no tracks, feed-forward mode only.
   Points are assigned to the frame they were unprojected from. **Do NOT use this for BA.**
 - `pycolmap_to_batch_np_matrix()` — inverse.

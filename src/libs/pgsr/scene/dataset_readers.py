@@ -179,7 +179,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             test_list = meta["test"]
             print(f"train_list {len(train_list)}, test_list {len(test_list)}")
 
-    if train_list is not None:
+    if eval and train_list is not None:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if c.image_name in train_list]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if c.image_name in test_list]
         print(f"train_cam_infos {len(train_cam_infos)}, test_cam_infos {len(test_cam_infos)}")
@@ -195,7 +195,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     ply_path = os.path.join(path, "sparse/points3D.ply")
     bin_path = os.path.join(path, "sparse/points3D.bin")
     txt_path = os.path.join(path, "sparse/points3D.txt")
-    if not os.path.exists(ply_path) or True:
+    # The `or True` rebuilt the cloud on every run, overwriting a visual-hull init.
+    if not os.path.exists(ply_path):
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:
             xyz, rgb, _ = read_points3D_binary(bin_path)

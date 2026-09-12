@@ -170,6 +170,15 @@ def storePly(path, xyz, rgb):
     ply_data.write(path)
 
 def readColmapSceneInfo(path, images, eval, llffhold=8):
+    # augenblick: read the split before the try/except below, which swallows every
+    # exception and reports it as a missing COLMAP model.
+    split_file = os.path.join(path, "split.json")
+    train_list, test_list = None, None
+    if os.path.exists(split_file):
+        with open(split_file) as file:
+            meta = json.load(file)
+            train_list, test_list = meta["train"], meta["test"]
+            print(f"split.json: {len(train_list)} train, {len(test_list)} test")
     # NOTE: There is a slight naming difference in the PGSR pre-processing
     sparse_folder_possibilities = ["sparse", "sparse/0/"]
     for sparse_folder in sparse_folder_possibilities:
@@ -194,7 +203,10 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             )
             cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
-            if eval:
+            if eval and train_list is not None:
+                train_cam_infos = [c for c in cam_infos if c.image_name in train_list]
+                test_cam_infos = [c for c in cam_infos if c.image_name in test_list]
+            elif eval:
                 train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
                 test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
             else:
@@ -207,8 +219,12 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             bin_path = os.path.join(path, f"{sparse_folder}", "points3D.bin")
             txt_path = os.path.join(path, f"{sparse_folder}", "points3D.txt")
 
-            xyz, rgb, _ = read_points3D_binary(bin_path)
-            storePly(ply_path, xyz, rgb)
+            # An SfM-derived points3D.ply is only a cache of points3D.bin, but a
+            # visual-hull scene writes its init cloud here deliberately. Rebuilding it
+            # unconditionally both ignored that cloud and destroyed it.
+            if not os.path.exists(ply_path):
+                xyz, rgb, _ = read_points3D_binary(bin_path)
+                storePly(ply_path, xyz, rgb)
             pcd = fetchPly(ply_path)
 
             scene_info = SceneInfo(point_cloud=pcd,

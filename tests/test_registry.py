@@ -50,4 +50,4 @@ def test_real_registries_populated():
     import augenblick.sfm  # noqa: F401
 
     assert set(registry.RECONSTRUCTION_REGISTRY) == {"2dgs", "sugar", "pgsr", "gw"}
-    assert set(registry.SFM_REGISTRY) == {"vggt", "colmap", "turntable"}
+    assert set(registry.SFM_REGISTRY) == {"vggt", "colmap", "turntable", "hull"}

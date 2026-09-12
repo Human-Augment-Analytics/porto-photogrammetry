@@ -154,7 +154,20 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
-    if eval:
+    # augenblick: an explicit split.json, written by augenblick.eval.split, overrides the
+    # llffhold rule so every backend holds out exactly the same views.
+    split_file = os.path.join(path, "split.json")
+    train_list, test_list = None, None
+    if os.path.exists(split_file):
+        with open(split_file) as file:
+            meta = json.load(file)
+            train_list, test_list = meta["train"], meta["test"]
+            print(f"split.json: {len(train_list)} train, {len(test_list)} test")
+
+    if eval and train_list is not None:
+        train_cam_infos = [c for c in cam_infos if c.image_name in train_list]
+        test_cam_infos = [c for c in cam_infos if c.image_name in test_list]
+    elif eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:

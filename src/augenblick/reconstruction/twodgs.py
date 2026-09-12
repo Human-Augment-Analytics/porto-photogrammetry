@@ -7,7 +7,8 @@ from typing import ClassVar
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import (
+    LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend)
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ RENDER_SCRIPT = TWODGS_DIR / "render.py"
 
 
 @dataclass(frozen=True)
-class TwoDGSConfig:
+class TwoDGSConfig(EvalParams, ResolutionParams):
     """Training and mesh-extraction parameters forwarded to 2DGS."""
 
     iterations: int = field(default=30_000, metadata={"help": "Training iterations"})
@@ -42,6 +43,8 @@ class TwoDGSConfig:
         "help": "Use unbounded mesh extraction (marching cubes)"})
     mesh_res: int = field(default=4096, metadata={"help": "Resolution for unbounded mesh extraction"})
     skip_mesh: bool = field(default=False, metadata={"help": "Skip mesh extraction (render only)"})
+    skip_train_export: bool = field(default=False, metadata={
+        "help": "Skip writing per-training-view PNGs; mesh extraction is unaffected"})
 
 
 @register_reconstruction
@@ -73,6 +76,10 @@ class TwoDGSBackend(SubprocessBackend):
         ]
         if c.white_background:
             train_cmd.append("--white_background")
+        if c.eval:
+            train_cmd.append("--eval")
+        if c.resolution != -1:
+            train_cmd += ["-r", str(c.resolution)]
 
         render_cmd = [
             sys.executable, str(RENDER_SCRIPT),
@@ -83,8 +90,16 @@ class TwoDGSBackend(SubprocessBackend):
             "--sdf_trunc", str(c.sdf_trunc),
             "--num_cluster", str(c.num_cluster),
             "--mesh_res", str(c.mesh_res),
-            "--skip_test",
         ]
+        # Held-out views only exist to be rendered when there is a split.
+        if not c.eval:
+            render_cmd.append("--skip_test")
+        else:
+            render_cmd.append("--eval")
+        if c.resolution != -1:
+            render_cmd += ["-r", str(c.resolution)]
+        if c.skip_train_export:
+            render_cmd.append("--skip_train")
         if c.unbounded:
             render_cmd.append("--unbounded")
         if c.skip_mesh:

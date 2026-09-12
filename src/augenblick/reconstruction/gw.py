@@ -8,12 +8,13 @@ from typing import ClassVar, Optional
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, EvalParams, Stage, SubprocessBackend
 
 logger = logging.getLogger(__name__)
 
 GW_DIR = LIBS_DIR / "gaussian_wrapping"
 TRAIN_SCRIPT = GW_DIR / "train.py"
+RENDER_SCRIPT = GW_DIR / "render.py"
 EXTRACT_SCRIPT = GW_DIR / "pivot_based_mesh_extraction.py"
 TEXTURE_SCRIPT = GW_DIR / "texture_mesh.py"
 
@@ -44,7 +45,7 @@ DEFAULT_TEXTURE_SH_DEGREE = 0
 
 
 @dataclass(frozen=True)
-class GWConfig:
+class GWConfig(EvalParams):
     """Training, extraction, and texture-refinement parameters for Gaussian Wrapping."""
 
     resolution: Optional[int] = field(default=None, metadata={
@@ -150,6 +151,9 @@ class GWBackend(SubprocessBackend):
     def build_train_cmd(self, model_path, scene_dir) -> list[str]:
         """Argv for the training stage, with any passthrough flags appended."""
         c = self.config
+        # Exposure compensation fits one exposure per training camera, and a held-out camera
+        # has none, so an evaluation run has to train without it to stay comparable.
+        exposure_flag = "--no-exposure_compensation" if c.eval else "--exposure_compensation"
         return [
             sys.executable, str(TRAIN_SCRIPT),
             "--rasterizer", "ours",
@@ -168,7 +172,7 @@ class GWBackend(SubprocessBackend):
             "--appearance_network_lr", str(c.appearance_network_lr),
             "--gaussian_features_lr", str(c.gaussian_features_lr),
             "--pgsr_appearance_lr", str(c.pgsr_appearance_lr),
-            "--exposure_compensation",
+            exposure_flag,
             "--data_device", "cpu",
             "--iterations", str(c.iterations),
             "--sh_degree", str(c.sh_degree),
@@ -177,9 +181,26 @@ class GWBackend(SubprocessBackend):
             "--densify_grad_threshold", str(c.densify_grad_threshold),
             "--lambda_depth_normal", str(c.lambda_depth_normal),
             "--multiview_factor", str(c.multiview_factor),
+            *(["--eval"] if c.eval else []),
             *(["-r", str(c.resolution)] if c.resolution is not None else []),
             *self.passthrough,
         ]
+
+    def build_render_cmd(self, model_path, scene_dir, extract_iteration) -> list[str]:
+        """Argv for the held-out render stage, which only an evaluation run needs."""
+        c = self.config
+        cmd = [
+            sys.executable, str(RENDER_SCRIPT),
+            "--rasterizer", "ours",
+            "-s", str(scene_dir),
+            "-m", str(model_path),
+            "--iteration", str(extract_iteration),
+            "--eval",
+            "--skip_train",
+        ]
+        if c.resolution is not None:
+            cmd += ["-r", str(c.resolution)]
+        return cmd
 
     def build_extract_cmd(self, model_path, scene_dir, extract_iteration) -> list[str]:
         """Argv for the pivot-based mesh extraction stage."""
@@ -231,16 +252,23 @@ class GWBackend(SubprocessBackend):
         return cmd
 
     def stages(self, scene: Scene, output_dir: Path) -> list[Stage]:
-        """Build the train, extract, and texture invocations."""
+        """Build the train, extract, and texture invocations, plus a render stage when evaluating."""
         scene_dir = scene.root
         it = self.extract_iteration
         mesh_path = self.get_mesh_path(output_dir, self.config.n_pivots, self.config.postprocess)
-        return [
-            Stage("Training", self.build_train_cmd(output_dir, scene_dir)),
+        stages = [Stage("Training", self.build_train_cmd(output_dir, scene_dir))]
+        # Rendering the held-out views takes seconds and needs only the trained model, while
+        # mesh extraction is the fragile stage. Running it first keeps the metrics even when
+        # extraction fails.
+        if self.config.eval:
+            stages.append(
+                Stage("Held-out rendering", self.build_render_cmd(output_dir, scene_dir, it)))
+        stages += [
             Stage("Mesh extraction", self.build_extract_cmd(output_dir, scene_dir, it)),
             Stage("Texture refinement",
                   self.build_texture_cmd(output_dir, scene_dir, mesh_path, it)),
         ]
+        return stages
 
     def mesh_path(self, output_dir: Path) -> Path:
         """The extracted (pre-texture) mesh path."""
