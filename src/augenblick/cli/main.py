@@ -1,4 +1,4 @@
-"""Command-line entry point: `augenblick {sfm,recon} <method> --scene <dir> --output <dir>`."""
+"""Command-line entry point: `augenblick {mask,sfm,recon} <method> --<input> <dir> --output <dir>`."""
 import argparse
 import logging
 import sys
@@ -7,21 +7,36 @@ from pathlib import Path
 from augenblick.core.config import add_dataclass_arguments
 from augenblick.core.errors import BackendError, MethodNotFound, SceneError
 from augenblick.core.registry import (
+    MASK_REGISTRY,
     RECONSTRUCTION_REGISTRY,
     SFM_REGISTRY,
+    get_mask,
     get_reconstruction,
     get_sfm,
 )
-from augenblick.core.scene import Scene
 
 logger = logging.getLogger(__name__)
 
 # Importing the packages populates the registries the subparsers are built from.
+import augenblick.masking  # noqa: E402,F401
 import augenblick.reconstruction  # noqa: E402,F401
 import augenblick.sfm  # noqa: E402,F401
 
 
-def _add_stage_parser(subparsers, stage: str, registry: dict[str, type], help_text: str):
+# One entry per stage; adding a stage is one edit here.
+#     stage -> (registry, getter, help, input_flag, input_help)
+STAGES: dict[str, tuple[dict[str, type], object, str, str, str]] = {
+    "mask": (MASK_REGISTRY, get_mask, "Run a masking method",
+             "--images", "Input directory of .jpg/.JPG/.jpeg photographs"),
+    "sfm": (SFM_REGISTRY, get_sfm, "Run an SfM method",
+            "--scene", "Input scene directory"),
+    "recon": (RECONSTRUCTION_REGISTRY, get_reconstruction,
+              "Run a reconstruction backend", "--scene", "Input scene directory"),
+}
+
+
+def _add_stage_parser(subparsers, stage: str, registry: dict[str, type],
+                      help_text: str, input_flag: str, input_help: str):
     """Build the parser for one stage, with a per-method subparser drawn from the registry."""
     parser = subparsers.add_parser(stage, help=help_text)
     parser.set_defaults(stage_parser=parser)
@@ -29,7 +44,8 @@ def _add_stage_parser(subparsers, stage: str, registry: dict[str, type], help_te
     method_subs = parser.add_subparsers(dest="method")
     for name, cls in sorted(registry.items()):
         sub = method_subs.add_parser(name, help=cls.__doc__)
-        sub.add_argument("--scene", type=Path, required=True, help="Input scene directory")
+        sub.add_argument(input_flag, dest="input_dir", type=Path, required=True,
+                         help=input_help)
         sub.add_argument("--output", type=Path, required=True, help="Output directory")
         add_dataclass_arguments(sub, cls.config_cls)
     return parser
@@ -39,11 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the full CLI parser, one subparser per registered method."""
     parser = argparse.ArgumentParser(
         prog="augenblick",
-        description="SfM initialisation and Gaussian-primitive surface reconstruction.",
+        description="Masking, SfM initialisation, and Gaussian-primitive surface reconstruction.",
     )
     subparsers = parser.add_subparsers(dest="stage")
-    _add_stage_parser(subparsers, "sfm", SFM_REGISTRY, "Run an SfM method")
-    _add_stage_parser(subparsers, "recon", RECONSTRUCTION_REGISTRY, "Run a reconstruction backend")
+    for stage, (reg, _, help_text, flag, help_flag) in STAGES.items():
+        _add_stage_parser(subparsers, stage, reg, help_text, flag, help_flag)
     return parser
 
 
@@ -73,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
 
-    registry = SFM_REGISTRY if args.stage == "sfm" else RECONSTRUCTION_REGISTRY
+    registry, getter, _, _, _ = STAGES[args.stage]
     if getattr(args, "list", False):
         return _list_methods(registry)
     if args.method is None:
@@ -81,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        cls = get_sfm(args.method) if args.stage == "sfm" else get_reconstruction(args.method)
+        cls = getter(args.method)
     except MethodNotFound as exc:
         logger.error(str(exc))
         return 2
@@ -93,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     method = cls.from_namespace(args, extras) if cls.accepts_passthrough else cls.from_namespace(args)
 
     try:
-        method.run(Scene(args.scene.resolve()), args.output.resolve())
+        method.run(cls.build_input(args.input_dir.resolve()), args.output.resolve())
     except SceneError as exc:
         logger.error(str(exc))
         return 2

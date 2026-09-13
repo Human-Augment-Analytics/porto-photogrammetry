@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 SFM_REGISTRY: dict[str, type] = {}
 RECONSTRUCTION_REGISTRY: dict[str, type] = {}
+MASK_REGISTRY: dict[str, type] = {}
 
 
 def _register(registry: dict[str, type], cls: type, kind: str) -> type:
@@ -36,6 +37,11 @@ def register_reconstruction(cls: type) -> type:
     return _register(RECONSTRUCTION_REGISTRY, cls, "reconstruction")
 
 
+def register_mask(cls: type) -> type:
+    """Register a masking method class under its `name` attribute."""
+    return _register(MASK_REGISTRY, cls, "mask")
+
+
 def get_sfm(name: str) -> type:
     """Return the registered SfM method class, or raise MethodNotFound."""
     return _get(SFM_REGISTRY, name, "SfM")
@@ -44,3 +50,8 @@ def get_sfm(name: str) -> type:
 def get_reconstruction(name: str) -> type:
     """Return the registered reconstruction method class, or raise MethodNotFound."""
     return _get(RECONSTRUCTION_REGISTRY, name, "reconstruction")
+
+
+def get_mask(name: str) -> type:
+    """Return the registered mask method class, or raise MethodNotFound."""
+    return _get(MASK_REGISTRY, name, "mask")

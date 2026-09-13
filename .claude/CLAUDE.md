@@ -25,6 +25,7 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 |------|----------|
 | [environment-and-gpu.md](MEMORY/environment-and-gpu.md) | Install via `scripts/`, per-GPU wrappers, numpy/build gotchas, submodules, GPU notes |
 | [data-morphosource.md](MEMORY/data-morphosource.md) | MorphoSource downloader: flags, project 000381689 contents, API gotchas |
+| [pipeline-masking.md](MEMORY/pipeline-masking.md) | The `mask` stage: contract, `rembg`/`threshold` methods, `--images` input, why it exists |
 | [pipeline-sfm.md](MEMORY/pipeline-sfm.md) | Data prep + all four SfM entry points with full flags (incl. turntable algorithm) |
 | [pipeline-reconstruction.md](MEMORY/pipeline-reconstruction.md) | The four reconstruction wrappers, their flags, and output paths |
 | [scene-format.md](MEMORY/scene-format.md) | COLMAP scene layout, mask naming, end-to-end data flow |
@@ -52,6 +53,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 |-------|---------|
 | Data acquisition | `scripts/download_morphosource_project.py` (MorphoSource project 000381689) |
 | Data preparation | `pipeline/preparation/prepare_uf_dataset.py` |
+| Masking | `augenblick mask {rembg,threshold}` — produces `masks/` from a flat images folder |
 | SfM | `augenblick sfm {vggt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
 | Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
@@ -66,6 +68,7 @@ git submodule update --init --recursive
 bash scripts/auto_setup.sh                  # detects GPU, dispatches to setup_<gpu>.sh
 pip install -e . --no-deps --no-build-isolation   # the augenblick CLI; flags are mandatory
 
+augenblick mask rembg --images <images> --output <scene>   # only if the scene has no masks/
 augenblick sfm vggt --scene <scene> --output <sfm> --use_ba
 augenblick recon 2dgs --scene <sfm> --output <out>
 ```
@@ -76,6 +79,8 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 
 ## Gotchas worth knowing before you type
 
+- `augenblick mask` takes **`--images`** (a flat images folder), not `--scene` — it produces a
+  scene rather than consuming one. `sfm`/`recon` still take `--scene`. See pipeline-masking.md.
 - `augenblick sfm turntable` refines an **existing** COLMAP scene; it is a post-SfM step, not a
   standalone SfM. The `SceneRefiner` base class enforces this.
 - The `augenblick` CLI comes from `pip install -e . --no-deps --no-build-isolation`, and must be

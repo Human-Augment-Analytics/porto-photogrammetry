@@ -32,15 +32,23 @@ It must be installed into **each** per-GPU conda env, since the SLURM jobs call 
 ## CLI
 
 ```
-augenblick sfm   <method> --scene <dir> --output <dir> [method flags]
-augenblick recon <method> --scene <dir> --output <dir> [method flags]
+augenblick mask  <method> --images <dir> --output <dir> [method flags]
+augenblick sfm   <method> --scene  <dir> --output <dir> [method flags]
+augenblick recon <method> --scene  <dir> --output <dir> [method flags]
+augenblick mask --list
 augenblick sfm --list
 augenblick recon --list
 ```
 
-Uniform `--scene` / `--output` replaces the old split between reconstruction positionals and
-SfM `--input_dir` / `--output_dir`. Methods: SfM `vggt`, `colmap`, `turntable`; reconstruction
-`2dgs`, `sugar`, `pgsr`, `gw`.
+`sfm`/`recon` take `--scene`; `mask` takes `--images` (a flat images folder — it produces a
+scene rather than consuming one). Methods: mask `rembg`, `threshold`; SfM `vggt`, `colmap`,
+`turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`.
+
+The per-stage input flag comes from one `STAGES` table in `cli/main.py`
+(`stage -> (registry, getter, help, input_flag, input_help)`); adding a stage is one entry
+there, not a new `if stage ==` arm. The flag's value is stored as `args.input_dir`, and
+`cls.build_input(args.input_dir)` turns it into the method's input type (a `Scene` or a raw
+`Path`) with no stage branching in `main()`.
 
 Exit codes, which SLURM guards depend on:
 
@@ -53,31 +61,47 @@ Exit codes, which SLURM guards depend on:
 ## Architecture
 
 ```
-core/     errors, Scene, config bridge, registry, process.run, StageTimer, Method ABC
-sfm/      base (SfMMethod, SceneRefiner) + vggt, colmap, turntable
+core/     errors, Scene, config bridge, registry, process.run, StageTimer, Method ABC + mixins
+masking/  base (MaskMethod, MaskResult, write/postprocess helpers) + rembg, threshold
+sfm/      base (SfMMethod, SceneRefiner) + vggt, colmap, turntable, hull
 reconstruction/  base (ReconstructionMethod, SubprocessBackend, Stage) + the four backends
 cli/      main.py — the only place logging is configured
 ```
 
-### The two ABCs
+### `Method`, its input mixins, and the stage ABCs
 
-`Method` (`core/method.py`) is the root: a `name`, a `config_cls`, `validate(scene)`, and
-`run(scene, output_dir) -> StageResult`.
+`Method` (`core/method.py`) is the root and is `Generic[Input]`: a `name`, a `config_cls`, an
+abstract classmethod `build_input(path) -> Input`, `validate(inp)`, and
+`run(inp, output_dir) -> StageResult`. The input type varies by stage, supplied by a mixin so
+every stage is still a `Method`:
 
-- **`SfMMethod`** requires only `images/`. **`SceneRefiner`** additionally requires an existing
-  non-empty `sparse/0/` — this is what encodes in the type system that `turntable` is a post-SfM
-  refinement step, not a standalone SfM.
-- **`ReconstructionMethod`** requires both `images/` and `sparse/0/`, and adds `stages()` and
-  `mesh_path()`. **`SubprocessBackend`** implements `run()` once for all four backends:
-  validate → `prepare()` → run each `Stage` under a `StageTimer`.
+- **`SceneInputMixin`** — `build_input` returns `Scene(path)`, `validate` calls
+  `require_images()`. Used by `sfm`/`recon`.
+- **`ImagesInputMixin`** — `build_input` returns the `Path` unchanged, `validate` checks the
+  dir exists and holds a file with an accepted suffix. Owns `IMAGE_SUFFIXES`. Used by `mask`.
+
+Stage ABCs:
+
+- **`MaskMethod(ImagesInputMixin, Method[Path])`** consumes an images dir, produces a
+  scene-shaped output (`images/` symlink + `masks/`). `run()` is implemented **once** on the
+  class (loop → `mask_for(path)` → postprocess → foreground-bounds check → `write_mask`), so a
+  new masking technique is a single `mask_for()`. See pipeline-masking.md for the mask contract.
+- **`SfMMethod(SceneInputMixin, Method[Scene])`** requires only `images/`. **`SceneRefiner`**
+  additionally requires a non-empty `sparse/0/` (calls `super().validate` then
+  `require_reconstruction()`) — encoding that `turntable` is a post-SfM refinement, not a
+  standalone SfM.
+- **`ReconstructionMethod(SceneInputMixin, Method[Scene])`** requires both `images/` and
+  `sparse/0/`, adds `stages()` and `mesh_path()`. **`SubprocessBackend`** implements `run()`
+  once for all four backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
 
 ### Registry
 
-`@register_sfm` / `@register_reconstruction` key on `cls.name`; duplicates raise `ValueError`.
-`get_sfm` / `get_reconstruction` raise `MethodNotFound` **listing the available names** — that
-message is the discoverability surface when a SLURM job passes a bad backend string. Registration
-fires on import, which is why `sfm/__init__.py` and `reconstruction/__init__.py` import their
-modules with `# noqa: F401`; removing those imports silently empties the registry.
+`@register_sfm` / `@register_reconstruction` / `@register_mask` key on `cls.name`; duplicates
+raise `ValueError`. `get_sfm` / `get_reconstruction` / `get_mask` raise `MethodNotFound`
+**listing the available names** — that message is the discoverability surface when a SLURM job
+passes a bad backend string. Registration fires on import, which is why `masking/__init__.py`,
+`sfm/__init__.py`, and `reconstruction/__init__.py` import their modules with `# noqa: F401`;
+removing those imports silently empties the registry.
 
 ### Config ↔ argparse bridge
 
@@ -146,6 +170,17 @@ backend is rejected instead of silently forwarded.
 It then appears in `augenblick recon --list` and `--help` with no CLI edit. An SfM method is the
 same, subclassing `SfMMethod` (or `SceneRefiner`) and implementing `run()` directly.
 
+## Adding a new masking method
+
+1. Create `masking/<name>.py` with a frozen `<Name>Config(MaskCommonConfig)` (inherit the
+   shared reject-bounds / `only_missing` / postprocess flags; add your own).
+2. Subclass `MaskMethod`, setting `name`, `title`, `config_cls`, and implementing **only**
+   `mask_for(image_path) -> bool ndarray [H, W]` matching the source dims. `run()` is inherited.
+3. Keep every heavy import (`numpy`/`cv2`/`skimage`/`rembg`/`PIL`) function-local, so
+   `augenblick mask --list` stays importable on a login node.
+4. Add it to the `masking/__init__.py` import line, and update the `MASK_REGISTRY` set assertion
+   in `tests/test_masking.py`.
+
 ## Testing
 
 `tests/` is CPU-only and runs on the login node:
@@ -158,6 +193,10 @@ pytest tests/
 handed to each backend script** is dictated by upstream `train.py` / `render.py` and must not
 drift — a wrong flag there surfaces only as a bad reconstruction hours later. Expected argv is
 derived by reading the pre-refactor wrappers, and asserted on the full list.
+
+`test_masking.py` is CPU-only too: it never runs `rembg` or `cv2.grabCut` on real data
+(a `_StubMask` returning a fixed rectangle exercises the run loop). Its most valuable check is
+that `write_mask` round-trips through the consumers' `Image.open(p).convert("L") > 127` reader.
 
 > `pytest` is not part of the pinned environment spec; it was installed into the rtx6000 env
 > (pure-Python, `--no-deps`-safe, does not perturb the numpy/torch pins).
