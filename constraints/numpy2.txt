@@ -4,6 +4,8 @@ scipy==1.15.3
 scikit-learn==1.6.1
 scikit-image==0.25.2
 imageio==2.37.4
+opencv-python-headless==4.11.0.86
+# Two submodules (light_glue, gaussian_wrapping) still declare plain opencv-python
 opencv-python==4.11.0.86
 kornia==0.8.2
 iopath==0.1.10

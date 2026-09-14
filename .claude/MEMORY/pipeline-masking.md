@@ -31,7 +31,8 @@ disable masking while looking successful).
 ## Methods
 
 - **`rembg`** (default): learned U²-Net / IS-Net / BiRefNet matting via rembg's ONNX runtime.
-  GPU when `onnxruntime-gpu` loads its CUDA provider, CPU otherwise (~10x slower). Downloads
+  GPU when `onnxruntime-gpu` loads its CUDA provider, CPU otherwise (4.0x slower — measured
+  2.35 s/mask GPU vs 9.40 s/mask CPU, isnet-general-use, L40S, 663 images). Downloads
   its model to `~/.u2net/` on first use — warm it on the login node.
   Key flags: `--model` (default `isnet-general-use`), `--alpha_threshold` (default 127),
   `--providers`.
@@ -39,8 +40,13 @@ disable masking while looking successful).
   all already pinned). Key flags: `--mode {otsu,grabcut}`, `--polarity {auto,dark-background,
   light-background}` (auto picks per image via border-vs-centre luminance), `--downscale`.
 
-Shared flags (both methods): `--only-missing` (resume; skips images that already have a
-mask), `--min_foreground`/`--max_foreground` (reject bounds), `--keep_largest`, `--fill_holes`.
+Shared flags (both methods): `--only_missing` (underscore, not `--only-missing`; resume, skips
+images that already have a mask), `--min_foreground`/`--max_foreground` (reject bounds),
+`--keep_largest`, `--fill_holes`.
+
+`--only_missing` reuses whatever is on disk **without checking how it was produced**, so masks
+written during a silent CPU fallback survive every later rerun and look like a cache hit. After
+fixing a fallback, delete `<output>/masks/` or drop the flag — a rerun alone will not redo them.
 
 ## Why the stage exists
 

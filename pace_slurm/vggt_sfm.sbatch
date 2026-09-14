@@ -8,10 +8,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:a100:1
-#SBATCH --mem=24gb
-#SBATCH --time=1:00:00
-#SBATCH --array=0-5
+#SBATCH --gres=gpu:l40s:1
+#SBATCH --mem=96gb
+#SBATCH --time=4:00:00
+#SBATCH --array=0-46%8
 #SBATCH --output=pace_slurm/logs/%x-%A_%a.out
 #SBATCH --error=pace_slurm/logs/%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
@@ -29,26 +29,14 @@ fi
 source "$SLURM_DIR/common.sh"
 
 
-# Sorted so an array index maps to the same scene across submissions.
-mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
-    -printf '%h\n' | xargs -r -n1 basename | sort)
-
-if [ "${#SCENES[@]}" -eq 0 ]; then
-    echo "ERROR: no <scene>/prepared dirs under $DATA_ROOT" >&2
-    exit 2
-fi
-
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [ "$IDX" -ge "${#SCENES[@]}" ]; then
-    echo "ERROR: array index $IDX exceeds ${#SCENES[@]} scene(s): ${SCENES[*]}" >&2
-    exit 2
-fi
-
-SCENE_NAME="${SCENES[$IDX]}"
-SCENE="$DATA_ROOT/$SCENE_NAME/prepared"
+discover_scenes
+select_scene
 OUT="$RESULT_ROOT/$SCENE_NAME/all/vggt"
 mkdir -p "$OUT"
 
-echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]}) -> $OUT"
+# Records elapsed time (and any OOM) for this scene, even if the job dies.
+start_timing "$SCENE_NAME" "$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)"
+
+echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]}) -> $OUT"
 
 augenblick sfm vggt --scene "$SCENE" --output "$OUT" "$@"

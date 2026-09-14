@@ -65,7 +65,8 @@ class Scene:
     def link_colmap_masks(self, dest: Path) -> Path | None:
         """Build a symlink directory naming masks the way COLMAP expects.
 
-        COLMAP looks for <image_name>.png; images are .jpg, so link <stem>.jpg.png.
+        COLMAP looks for <image_name>.png, so a mask named after the image *stem* must be
+        linked under the image's full filename.
 
         Args:
             dest: Directory to populate with the renamed symlinks.
@@ -75,9 +76,20 @@ class Scene:
         """
         if not self.has_masks():
             return None
+        images_by_stem = {p.stem: p.name for p in self.images_dir.iterdir() if p.is_file()}
         dest.mkdir(parents=True, exist_ok=True)
+        unmatched = []
         for m in os.listdir(self.masks_dir):
-            link = dest / f"{m.rsplit('.', 1)[0]}.jpg.png"
+            stem = m.rsplit('.', 1)[0]
+            image_name = images_by_stem.get(stem)
+            if image_name is None:
+                unmatched.append(m)
+                continue
+            link = dest / f"{image_name}.png"
             if not link.exists():
                 os.symlink(self.masks_dir / m, link)
+        if unmatched:
+            logger.warning(
+                f"{len(unmatched)} mask(s) in {self.masks_dir} match no image and were "
+                f"skipped (e.g. {unmatched[0]})")
         return dest

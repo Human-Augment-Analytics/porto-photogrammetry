@@ -26,7 +26,7 @@ partition, GPU selection, module names, conda root, data roots). Each dir has it
 - Selects a GPU with `--gres=gpu:<model>:1`, **not** a partition. Switching card means changing
   the gres. Models on `ice-gpu`: `a100`, `l40s`, `h100`, `h200`, `a40`, `rtx_6000`, `v100`.
 - Conda root `$HOME/scratch/conda` (home is capped at 30 GB); all envs there are
-  cu130 / torch 2.9.1 / numpy 2.x. `conda.sh` is not on the default
+  cu129 / torch 2.9.1 / numpy 2.x. `conda.sh` is not on the default
   path; `common.sh` sources it from the PACE anaconda install and takes a `CONDA_SH` override.
 - PACE has no `xerces`/`yasm` modules; nothing here needs them, so its `common.sh` omits them.
 - A100s are the scarce card (8 cluster-wide); `l40s`/`h200` queue far faster. Never submit a
@@ -44,9 +44,28 @@ partition, GPU selection, module names, conda root, data roots). Each dir has it
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw`, `SFM=<name>` picks the input SfM |
 
+Two layout notes for any script chaining mask -> SfM -> recon over one scene. The neurips set is
+**flat** (`<scene>/{images,masks}`), not the nested `data/main` shape `common.sh` auto-detects,
+so `DATA_ROOT` must be exported *before* sourcing it. And keying outputs by GPU
+(`<root>/<gpu>/<scene>/...`) is what lets the same scene run on several cards without the runs
+overwriting each other.
+
+COLMAP on ~660 images costs 1-3 h, so a chained script should reuse a converged `sparse/0`
+rather than redo it after a failure in a later stage — otherwise every recon-stage OOM or bad
+GPU pays for SfM twice.
+
 All job scripts take `--scene`/`--output` built from the scene roots, not positionals, and
 forward `"$@"` to the `augenblick` CLI. Scenes are discovered as `<scene>/prepared` dirs under
 `DATA_ROOT` and **sorted**, so an array index maps to the same scene across submissions.
+
+## Masking stage
+
+The `mask` stage's default method (`rembg`) needs `rembg` + `onnxruntime-gpu`, both ordinary `requirements.txt` entries, so every `augenblick_*` env carries them and a masking job uses the per-GPU env `common.sh` already selects.
+
+`common.sh` prepends the `site-packages/nvidia/*/lib` dirs to `LD_LIBRARY_PATH` after
+`conda activate` (15 dirs). torch preloads those libraries itself, but rembg imports
+onnxruntime without torch, so without this hook ORT finds no `libcudnn.so.9`/`libcufft.so.11`
+and drops to CPU. A one-line echo of the dir count beside the mask call makes that visible.
 
 ## Data roots
 
@@ -69,9 +88,9 @@ partition or gres; pass those too.
 |---|-----|-----|-------------|------|
 | HPG | `rtx6000` (default) | `augenblick_rtx_pro_6000` | `cuda/13.0.2` | 12.0 |
 | HPG | `b200` | `augenblick_b200` | `cuda/12.8` | 10.0 |
-| PACE | `a100` (default) | `augenblick_a100` | `cuda/13.0.1` | 8.0 |
-| PACE | `l40s` | `augenblick_l40s` | `cuda/13.0.1` | 8.9 |
-| PACE | `a40` | `augenblick_a40` | `cuda/13.0.1` | 8.6 |
+| PACE | `a100` (default) | `augenblick_a100` | `cuda/12.9.1` | 8.0 |
+| PACE | `l40s` | `augenblick_l40s` | `cuda/12.9.1` | 8.9 |
+| PACE | `a40` | `augenblick_a40` | `cuda/12.9.1` | 8.6 |
 
 Arch strings mirror `GPU_ARCH` in the matching `scripts/setup_<gpu>.sh`; `common.sh` exits 2 with a build hint if the env is absent. Note: `scripts/auto_setup.sh` maps compute cap 8.9 to `setup_l40s.sh`, which serves every Ada
 sm_8.9 card (L40S, L40, RTX 6000 Ada) — the RTX 6000 Ada is a *different* card from the Blackwell RTX Pro 6000 on `hpg-rtx6000`.
@@ -83,7 +102,16 @@ sm_8.9 card (L40S, L40, RTX 6000 Ada) — the RTX 6000 Ada is a *different* card
 - `module purge` first, since a batch shell inherits no `~/.bashrc`.
 - `conda activate` requires sourcing `conda.sh` first in a non-interactive shell.
 - `--mem` set explicitly (the interactive `salloc` let it default): 24 gb for SfM jobs, 64 gb for
-  reconstruction and the template.
+  reconstruction and the template. **64 gb is not enough for 2DGS mesh extraction on a ~660-image
+  scene** — TSDF at `--mesh_res 4096` peaked at 97 GiB RSS and was `oom_kill`ed at 64 gb; 192 gb
+  cleared it. Nodes here carry 515–2063 gb, so headroom is free. A host-RAM OOM reads as state
+  `OUT_OF_MEMORY`, return code `-9`/SIGKILL and a `Detected 1 oom_kill event` line — **not** a
+  CUDA OOM, and not a finding about the GPU.
+- **Slurm snapshots the batch script at submit time.** Editing an sbatch file after `sbatch`
+  returns does not affect the queued or running job — save first, then submit, and never issue
+  the edit and the `sbatch` in the same breath.
+- `scontrol update MinMemoryNode=` wants **megabytes with no suffix** (`196608`); `192G` is
+  rejected as "Invalid MinMemoryNode value".
 - Slurm copies the script to `/var/spool`, so `$0` cannot locate the repo; each script resolves
   `common.sh` via `$SLURM_SUBMIT_DIR` and errors out if submitted from elsewhere.
 - Logs to `<dir>/logs/%x-%A_%a.{out,err}` (`%x-%j` for the non-array template), gitignored.

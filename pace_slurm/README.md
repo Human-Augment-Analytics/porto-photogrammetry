@@ -66,7 +66,7 @@ needs it.
 
 ## Picking a GPU
 
-`GPU=a100` (default), `l40s`, or `a40` selects the conda env, CUDA module, and arch string in `common.sh` (all three are `cuda/13.0.1` / torch 2.9.1). It does **not** change the gres —
+`GPU=a100` (default), `l40s`, or `a40` selects the conda env, CUDA module, and arch string in `common.sh` (all three are `cuda/12.9.1` / torch 2.9.1). It does **not** change the gres —
 override that too:
 
 ```bash
@@ -117,7 +117,7 @@ sacct -j <jobid> --format=JobID,JobName,State,Elapsed,MaxRSS
 
 - **`~/.bashrc` is not sourced in a batch job.** `common.sh` loads the modules explicitly; do not assume your interactive environment carries over.
 - **PACE has no `xerces` or `yasm` modules** (HiPerGator does). Nothing in the pipeline needs them, so the PACE `common.sh` simply omits them.
-- **PACE's default CUDA module is `cuda/12.9.1`**, but the A100 env is built against `cuda/13.0.1`. `common.sh` loads the matching one explicitly.
+- **CUDA is `cuda/12.9.1` everywhere** — PACE's default, what the envs are built against (torch 2.9.1+cu129), and what `common.sh` loads explicitly. One generation on purpose: `onnxruntime-gpu` links CUDA 12 sonames, so a cu130 torch leaves the masking stage's GPU provider unloadable. Keep the wrapper, the module load, and the torch index aligned when bumping any of them.
 - **COLMAP is intentionally not module-loaded.** Every SfM path drives the `pycolmap` Python API from the conda env, so no COLMAP binary is needed anywhere.
 - **The jobs call the bare `augenblick` console script**, so the package must be installed (`pip install -e . --no-deps --no-build-isolation`) into each per-GPU conda env.
 - **Never run `scripts/setup_*.sh` from two concurrent jobs against one checkout** — they race on the same `build/` dirs and silently reuse stale artifacts. Use a separate checkout per parallel build. Training jobs sharing a checkout are fine.

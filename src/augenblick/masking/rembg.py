@@ -1,7 +1,7 @@
 """Learned U^2-Net matting via rembg's ONNX runtime; the default masking method.
 
 Runs on GPU when onnxruntime-gpu can load its CUDA provider; falls back to CPU with a
-~10x slowdown. All heavy imports are function-local so `augenblick mask --list` on a
+~4x slowdown. All heavy imports are function-local so `augenblick mask --list` on a
 login node does not require rembg.
 """
 import logging
@@ -55,11 +55,18 @@ class RembgMask(MaskMethod):
         else:
             providers = None
         logger.info(f"onnxruntime providers available: {available}")
-        if "CUDAExecutionProvider" not in available:
-            logger.warning(
-                "no CUDAExecutionProvider — running rembg on CPU (~10x slower); "
-                "rebuild the env with scripts/setup_<gpu>.sh")
         self._session = new_session(self.config.model, providers=providers)
+
+        # get_available_providers() lists what ORT was compiled with, not what loaded, only the live session reports the truth.
+        active = getattr(self._session, "inner_session", None)
+        active = active.get_providers() if active is not None else []
+        if "CUDAExecutionProvider" not in active:
+            logger.warning(
+                f"rembg running on CPU (~4x slower) — active providers: {active}; "
+                "CUDA provider did not load. Check that the env's nvidia/*/lib dirs are on "
+                "LD_LIBRARY_PATH (pace_slurm/common.sh does this)")
+        else:
+            logger.info("rembg using CUDAExecutionProvider")
         return self._session
 
     def mask_for(self, image_path: Path):

@@ -36,27 +36,13 @@ case "$SFM" in
 esac
 
 
-# Sorted so an array index maps to the same scene across submissions.
-mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
-    -printf '%h\n' | xargs -r -n1 basename | sort)
-
-if [ "${#SCENES[@]}" -eq 0 ]; then
-    echo "ERROR: no <scene>/prepared dirs under $DATA_ROOT" >&2
-    exit 2
-fi
-
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [ "$IDX" -ge "${#SCENES[@]}" ]; then
-    echo "ERROR: array index $IDX exceeds ${#SCENES[@]} scene(s): ${SCENES[*]}" >&2
-    exit 2
-fi
-
-SCENE_NAME="${SCENES[$IDX]}"
-PREPARED="$DATA_ROOT/$SCENE_NAME/prepared"
+discover_scenes
+select_scene
+PREPARED="$SCENE"
 SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
 OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-turntable"
 
-echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]})"
+echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"
 echo "output     : $OUT"
 
