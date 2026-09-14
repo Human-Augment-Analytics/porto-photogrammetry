@@ -48,6 +48,27 @@ images that already have a mask), `--min_foreground`/`--max_foreground` (reject 
 written during a silent CPU fallback survive every later rerun and look like a cache hit. After
 fixing a fallback, delete `<output>/masks/` or drop the flag — a rerun alone will not redo them.
 
+## Cost is postprocessing, not inference
+
+`rembg` infers at 1024² but returns a mask at **source resolution**, and `run()` passes that
+straight to `postprocess_mask` with no downscale — so `keep_largest`/`fill_holes` do morphology
+on 26 MP instead of 1 MP. On 6240×4160 images the per-image budget is ~2.2 s (L40S, measured
+over 4370 images):
+
+| Stage | ~Time | Device |
+|-------|-------|--------|
+| `binary_fill_holes` | 1.70 s | CPU |
+| decode 26 MP JPEG → RGB | 0.57 s | CPU |
+| `write_mask` (`optimize=True`) | 0.32 s | CPU |
+| `ndimage.label` (`keep_largest`) | 0.23 s | CPU |
+| U²-Net inference | ~0.1–0.2 s | GPU |
+
+So the GPU is mostly idle and a masking job is CPU-bound — more `--cpus-per-task` helps, a
+bigger card does not. Postprocessing at model resolution and upscaling afterwards would cut
+~3-4x, but changes mask boundaries (low-res hole-filling can miss thin structures), so it is a
+behaviour change to validate visually, not a free win. Verified against base.py and a timed run
+of the 10-scene neurips subset.
+
 ## Why the stage exists
 
 9 of 47 neurips scenes ship no masks, all ≥432 images. Masked BA needs masks; `sfm hull`

@@ -9,6 +9,7 @@ logic is identical.
 
 ```bash
 # One array task per scene found under DATA_ROOT; add --array=N for a single scene.
+MASK_METHOD=rembg sbatch pace_slurm/mask.sbatch
 sbatch pace_slurm/vggt_sfm.sbatch
 sbatch pace_slurm/vggt_ba_sfm.sbatch
 sbatch pace_slurm/colmap_sfm.sbatch
@@ -21,6 +22,19 @@ BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch
 feeds it; `turntable_sfm.sbatch` takes `SFM=` too and runs that SfM first if its output is
 missing. Scenes are discovered under `DATA_ROOT` and sorted, so an array index maps to the same
 scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
+
+`mask.sbatch` runs the masking stage and takes `MASK_METHOD=rembg|threshold` (default `rembg`)
+and `OUT_LAYOUT=nested|flat` (default `nested`). `nested` writes
+`<scene>/masked/<method>/` so the two methods coexist per scene; `flat` writes straight to
+`<scene>/`, which is convenient when `RESULT_ROOT` is already scoped to one run but means a
+second method silently overwrites the first.
+Unlike every other job here it consumes `<scene>/images` rather than a whole scene, and writes a
+new scene-shaped output — an `images/` symlink plus `masks/` — to
+`$RESULT_ROOT/<scene>/masked/<method>/`. Point the SfM jobs at that directory to run them
+masked. It is the stage that *produces* masks, so it is the one job that does not need them
+present up front; `--only_missing` makes a requeued job resume where it stopped. The `rembg`
+method fails the job outright if onnxruntime cannot load its CUDA provider, rather than falling
+back to CPU at ~4x the cost.
 
 `hull_sfm.sbatch` carves the visual hull from the masks and writes it as the initial point
 cloud. Its output differs from the input SfM only in `sparse/0/points3D.ply`, so running

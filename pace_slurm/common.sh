@@ -35,8 +35,14 @@ case "$GPU" in
         GPU_ARCH="9.0"
         GRES_NAME="h200"
         ;;
+    h100)
+        CONDA_ENV="$CONDA_ROOT/augenblick_h100"
+        CUDA_MODULE="cuda/12.9.1"
+        GPU_ARCH="9.0"
+        GRES_NAME="h100"
+        ;;
     *)
-        echo "ERROR: unknown GPU='$GPU' (valid: a100, l40s, a40, h200)" >&2
+        echo "ERROR: unknown GPU='$GPU' (valid: a100, l40s, a40, h100, h200)" >&2
         exit 2
         ;;
 esac
