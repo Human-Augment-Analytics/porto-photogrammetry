@@ -45,6 +45,19 @@ class TwoDGSConfig(EvalParams, ResolutionParams):
     skip_mesh: bool = field(default=False, metadata={"help": "Skip mesh extraction (render only)"})
     skip_train_export: bool = field(default=False, metadata={
         "help": "Skip writing per-training-view PNGs; mesh extraction is unaffected"})
+    lambda_mask_hull: float = field(default=0.0, metadata={
+        "help": "One-sided dilated mask loss weight (Gaussian Surfels form); 0 disables"})
+    mask_dilate_kernel: int = field(default=9, metadata={
+        "help": "Max-pool kernel size used to dilate the GT silhouette before the mask loss"})
+    hull_sdf_path: str = field(default="", metadata={
+        "help": "Path to a precomputed hull SDF grid: .npz with keys sdf [D,H,W] in "
+                "z,y,x order and lo/hi bounds; empty disables the hull-centre penalty"})
+    lambda_hull: float = field(default=0.0, metadata={
+        "help": "Annealed 3D hull-SDF penalty weight on Gaussian centres; 0 disables"})
+    hull_anneal_start_iter: int = field(default=500, metadata={
+        "help": "Iteration the hull-SDF penalty starts annealing down from lambda_hull"})
+    hull_anneal_end_iter: int = field(default=15_000, metadata={
+        "help": "Iteration the hull-SDF penalty reaches 0"})
 
 
 @register_reconstruction
@@ -73,7 +86,14 @@ class TwoDGSBackend(SubprocessBackend):
             "--densify_grad_threshold", str(c.densify_grad_threshold),
             "--densify_until_iter", str(c.densify_until_iter),
             "--opacity_cull", str(c.opacity_cull),
+            "--lambda_mask_hull", str(c.lambda_mask_hull),
+            "--mask_dilate_kernel", str(c.mask_dilate_kernel),
+            "--lambda_hull", str(c.lambda_hull),
+            "--hull_anneal_start_iter", str(c.hull_anneal_start_iter),
+            "--hull_anneal_end_iter", str(c.hull_anneal_end_iter),
         ]
+        if c.hull_sdf_path:
+            train_cmd += ["--hull_sdf_path", str(c.hull_sdf_path)]
         if c.white_background:
             train_cmd.append("--white_background")
         if c.eval:

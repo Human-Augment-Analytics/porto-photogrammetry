@@ -92,6 +92,22 @@ class OptimizationParams(ParamGroup):
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
+
+        # One-sided dilated mask loss, following Gaussian Surfels (arXiv:2404.17774):
+        # penalises rendered alpha only where it bleeds OUTSIDE the dilated silhouette, and
+        # never rewards alpha inside it, so concavities are not fattened.
+        # lambda_mask_hull=0 (default) leaves behaviour unchanged.
+        self.lambda_mask_hull = 0.0
+        self.mask_dilate_kernel = 9
+
+        # Annealed 3D hull-SDF penalty on Gaussian centres: penalises centres whose signed
+        # distance to a precomputed visual-hull SDF grid is positive (outside), weighted by
+        # opacity, with the weight linearly annealed to 0 so photometric evidence can still
+        # carve concavities. hull_sdf_path="" (default) disables the term entirely.
+        self.hull_sdf_path = ""
+        self.lambda_hull = 0.0
+        self.hull_anneal_start_iter = 500
+        self.hull_anneal_end_iter = 15_000
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

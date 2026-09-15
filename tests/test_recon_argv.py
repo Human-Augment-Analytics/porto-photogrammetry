@@ -36,6 +36,11 @@ def test_2dgs_argv():
         "--densify_grad_threshold", "0.0002",
         "--densify_until_iter", "15000",
         "--opacity_cull", "0.05",
+        "--lambda_mask_hull", "0.0",
+        "--mask_dilate_kernel", "9",
+        "--lambda_hull", "0.0",
+        "--hull_anneal_start_iter", "500",
+        "--hull_anneal_end_iter", "15000",
     ]
     assert render.cmd == [
         sys.executable, str(LIBS_DIR / "2dgs" / "render.py"),
