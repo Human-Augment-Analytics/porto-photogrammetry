@@ -4,7 +4,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from augenblick.core.method import Method, StageResult
+from augenblick.core.method import Method, SceneInputMixin, StageResult
 from augenblick.core.scene import Scene
 
 logger = logging.getLogger(__name__)
@@ -19,12 +19,8 @@ class SfMResult(StageResult):
     num_points: int = 0
 
 
-class SfMMethod(Method):
+class SfMMethod(SceneInputMixin, Method[Scene]):
     """Consumes a scene with images/, produces sparse/0/ in the output directory."""
-
-    def validate(self, scene: Scene) -> None:
-        """Require a non-empty images/ directory."""
-        scene.require_images()
 
     @abstractmethod
     def run(self, scene: Scene, output_dir: Path) -> SfMResult:
@@ -44,5 +40,5 @@ class SceneRefiner(SfMMethod):
 
     def validate(self, scene: Scene) -> None:
         """Require images/ and an existing non-empty sparse/0/ to refine."""
-        scene.require_images()
+        super().validate(scene)
         scene.require_reconstruction()

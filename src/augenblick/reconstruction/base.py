@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from augenblick.core import process
-from augenblick.core.method import Method, StageResult
+from augenblick.core.method import Method, SceneInputMixin, StageResult
 from augenblick.core.scene import Scene
 from augenblick.core.timing import StageTimer
 from augenblick.eval.split import write_split
@@ -50,12 +50,12 @@ class Stage:
     cmd: list[str]
 
 
-class ReconstructionMethod(Method):
+class ReconstructionMethod(SceneInputMixin, Method[Scene]):
     """Consumes a COLMAP scene, produces a mesh."""
 
     def validate(self, scene: Scene) -> None:
         """Require both images/ and a non-empty sparse/0/ model."""
-        scene.require_images()
+        super().validate(scene)
         scene.require_reconstruction()
 
     @abstractmethod

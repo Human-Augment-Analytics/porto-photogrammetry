@@ -3,7 +3,7 @@
 # Hull refines an existing COLMAP scene, so the input SfM is run first if it is absent.
 # Usage: sbatch pace_slurm/hull_sfm.sbatch [extra hull flags]
 # Single scene: sbatch --array=N pace_slurm/hull_sfm.sbatch   (N = index in the sorted scene list)
-# SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
+# SFM selects which SfM result is refined: results/<scene>/<SFM>/ (default colmap).
 # Output differs from the input only in sparse/0/points3D.ply, so feeding both to recon.sbatch
 # gives an initialisation ablation with poses, intrinsics and training schedule held fixed.
 #SBATCH --job-name=hull-sfm
@@ -55,8 +55,8 @@ fi
 
 SCENE_NAME="${SCENES[$IDX]}"
 PREPARED="$DATA_ROOT/$SCENE_NAME/prepared"
-SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
-OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-hull"
+SFM_OUT="$RESULT_ROOT/$SCENE_NAME/$SFM"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-hull"
 
 echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"

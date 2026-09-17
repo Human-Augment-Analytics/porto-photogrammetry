@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 SFM_REGISTRY: dict[str, type] = {}
 RECONSTRUCTION_REGISTRY: dict[str, type] = {}
+MASK_REGISTRY: dict[str, type] = {}
 
 
 def _register(registry: dict[str, type], cls: type, kind: str) -> type:
@@ -17,8 +18,17 @@ def _register(registry: dict[str, type], cls: type, kind: str) -> type:
     return cls
 
 
-def _get(registry: dict[str, type], name: str, kind: str) -> type:
-    """Look up a method class, reporting the available names when it is absent."""
+def get_method(registry: dict[str, type], name: str, kind: str) -> type:
+    """Look up a method class, reporting the available names when it is absent.
+
+    Args:
+        registry: The stage's name-to-class registry.
+        name: Method name as typed on the command line.
+        kind: Stage label used in the error message, e.g. "SfM".
+
+    Returns:
+        The registered class.
+    """
     try:
         return registry[name]
     except KeyError:
@@ -36,11 +46,21 @@ def register_reconstruction(cls: type) -> type:
     return _register(RECONSTRUCTION_REGISTRY, cls, "reconstruction")
 
 
+def register_mask(cls: type) -> type:
+    """Register a masking method class under its `name` attribute."""
+    return _register(MASK_REGISTRY, cls, "mask")
+
+
 def get_sfm(name: str) -> type:
     """Return the registered SfM method class, or raise MethodNotFound."""
-    return _get(SFM_REGISTRY, name, "SfM")
+    return get_method(SFM_REGISTRY, name, "SfM")
 
 
 def get_reconstruction(name: str) -> type:
     """Return the registered reconstruction method class, or raise MethodNotFound."""
-    return _get(RECONSTRUCTION_REGISTRY, name, "reconstruction")
+    return get_method(RECONSTRUCTION_REGISTRY, name, "reconstruction")
+
+
+def get_mask(name: str) -> type:
+    """Return the registered mask method class, or raise MethodNotFound."""
+    return get_method(MASK_REGISTRY, name, "mask")

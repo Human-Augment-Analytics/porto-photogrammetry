@@ -25,7 +25,8 @@ not preserve. `MEMORY/` describes the tree as it *is*; `PLANS/` describes how it
   reason to rewrite it — the file is a record of a decision made at a point in time.
 
 Landed: `augenblick-package-architecture.md` (the `src/augenblick` package and CLI),
-`move-backends-to-src-libs.md` (relocating third-party backends under `src/libs/`).
+`move-backends-to-src-libs.md` (relocating third-party backends under `src/libs/`),
+`masking-stage.md` (the `mask` stage, input mixins on `Method`).
 
 ## Code comment and docstring style
 

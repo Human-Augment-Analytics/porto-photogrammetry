@@ -30,6 +30,10 @@ Raw data (mixed images + masks)
     ▼
 prepare_uf_dataset.py ──► images/ + masks/
     │
+    │   (a flat images folder with no masks? produce them first:)
+    │   augenblick mask rembg --images <dir> --output <scene>  ──► images/ symlink + masks/
+    │   (see pipeline-masking.md)
+    │
     ├──► augenblick sfm vggt   ──► sparse/0/    (VGGT → depth + cameras → optional BA)
     └──► augenblick sfm colmap ──► sparse/0/    (mask-restricted SIFT, pycolmap API)
                  │

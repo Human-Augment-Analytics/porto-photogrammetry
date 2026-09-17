@@ -1,9 +1,7 @@
 tqdm
 hydra-core
 omegaconf
-opencv-python
 scipy
-onnxruntime
 requests
 trimesh
 matplotlib

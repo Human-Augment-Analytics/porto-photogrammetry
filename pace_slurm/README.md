@@ -9,6 +9,7 @@ logic is identical.
 
 ```bash
 # One array task per scene found under DATA_ROOT; add --array=N for a single scene.
+MASK_METHOD=rembg sbatch pace_slurm/mask.sbatch
 sbatch pace_slurm/vggt_sfm.sbatch
 sbatch pace_slurm/vggt_ba_sfm.sbatch
 sbatch pace_slurm/colmap_sfm.sbatch
@@ -21,6 +22,22 @@ BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch
 feeds it; `turntable_sfm.sbatch` takes `SFM=` too and runs that SfM first if its output is
 missing. Scenes are discovered under `DATA_ROOT` and sorted, so an array index maps to the same
 scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
+
+`mask.sbatch` runs the masking stage and takes `MASK_METHOD=rembg|threshold` (default `rembg`)
+and `OUT_LAYOUT=nested|flat` (default `nested`). `nested` writes
+`<scene>/masked/<method>/` so the two methods coexist per scene; `flat` writes straight to
+`<scene>/`, which is convenient when `RESULT_ROOT` is already scoped to one run but means a
+second method silently overwrites the first.
+Unlike every other job here it consumes `<scene>/images` rather than a whole scene, and writes a
+new scene-shaped output — an `images/` symlink plus `masks/` — to
+`$RESULT_ROOT/<scene>/masked/<method>/`. Point the SfM jobs at that directory to run them
+masked. It is the stage that *produces* masks, so it is the one job that does not need them
+present up front; `--only_missing` makes a requeued job resume where it stopped. The `rembg`
+method fails the job outright if onnxruntime cannot load its CUDA provider, rather than falling
+back to CPU at ~4x the cost. Its timing rows record the **scene** in the scene column, like
+every other job, and take the method from the `method` column — which is the Slurm job name. To
+tell two methods apart in one CSV, submit with a matching job name:
+`MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch`.
 
 `hull_sfm.sbatch` carves the visual hull from the masks and writes it as the initial point
 cloud. Its output differs from the input SfM only in `sparse/0/points3D.ply`, so running
@@ -49,7 +66,7 @@ checkout (which lives on scratch), not to absolute cluster paths:
 
 ```
 DATA_ROOT   = $REPO_ROOT/data/main      # <scene>/prepared/{images,masks}
-RESULT_ROOT = $REPO_ROOT/output         # <scene>/all/<sfm>[-<backend>]/
+RESULT_ROOT = $REPO_ROOT/output         # <scene>/<sfm>[-<backend>]/
 ```
 
 Override either in the environment to relocate. Prepared scenes are built with:
@@ -64,9 +81,20 @@ python pipeline/preparation/prepare_uf_dataset.py data/main/<scene>/images \
 dropped and `prepared/images` comes out empty. Of the six scenes, only `TH24-21_Birdsnest`
 needs it.
 
+## Timing rows
+
+Every job appends one row to `$RESULT_ROOT/_timing/sfm_timings.csv`:
+`method,scene,gpu,n_images,seconds,exit_code,note,jobid,node,finished`. The `gpu` column records
+the hardware **actually allocated**, not the `GPU=` target: on a MIG-partitioned node it reads
+`<model>_<profile>` (e.g. `rtx_pro_6000_2g.48gb`) and on a whole card just `<model>`.
+
+This matters on `ice-bw-gpu`, where each node advertises **16** `rtx_pro_6000_blackwell` gres
+across 4 physical cards — so one gres is a MIG slice (2/12 of the SMs, 48 of 96 GB), not a card.
+Recording the bare model there would compare a fraction of a Blackwell against a whole L40S.
+
 ## Picking a GPU
 
-`GPU=a100` (default), `l40s`, or `a40` selects the conda env, CUDA module, and arch string in `common.sh` (all three are `cuda/13.0.1` / torch 2.9.1). It does **not** change the gres —
+`GPU=a100` (default), `l40s`, or `a40` selects the conda env, CUDA module, and arch string in `common.sh` (all three are `cuda/12.9.1` / torch 2.9.1). It does **not** change the gres —
 override that too:
 
 ```bash
@@ -117,7 +145,7 @@ sacct -j <jobid> --format=JobID,JobName,State,Elapsed,MaxRSS
 
 - **`~/.bashrc` is not sourced in a batch job.** `common.sh` loads the modules explicitly; do not assume your interactive environment carries over.
 - **PACE has no `xerces` or `yasm` modules** (HiPerGator does). Nothing in the pipeline needs them, so the PACE `common.sh` simply omits them.
-- **PACE's default CUDA module is `cuda/12.9.1`**, but the A100 env is built against `cuda/13.0.1`. `common.sh` loads the matching one explicitly.
+- **CUDA is `cuda/12.9.1` everywhere** — PACE's default, what the envs are built against (torch 2.9.1+cu129), and what `common.sh` loads explicitly. One generation on purpose: `onnxruntime-gpu` links CUDA 12 sonames, so a cu130 torch leaves the masking stage's GPU provider unloadable. Keep the wrapper, the module load, and the torch index aligned when bumping any of them.
 - **COLMAP is intentionally not module-loaded.** Every SfM path drives the `pycolmap` Python API from the conda env, so no COLMAP binary is needed anywhere.
 - **The jobs call the bare `augenblick` console script**, so the package must be installed (`pip install -e . --no-deps --no-build-isolation`) into each per-GPU conda env.
 - **Never run `scripts/setup_*.sh` from two concurrent jobs against one checkout** — they race on the same `build/` dirs and silently reuse stale artifacts. Use a separate checkout per parallel build. Training jobs sharing a checkout are fine.

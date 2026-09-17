@@ -3,7 +3,7 @@
 # Turntable refines an existing COLMAP scene, so the input SfM is run first if it is absent.
 # Usage: sbatch pace_slurm/turntable_sfm.sbatch [extra turntable flags]
 # Single scene: sbatch --array=N pace_slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
-# SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
+# SFM selects which SfM result is refined: results/<scene>/<SFM>/ (default colmap).
 #SBATCH --job-name=turntable-sfm
 #SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
@@ -36,27 +36,13 @@ case "$SFM" in
 esac
 
 
-# Sorted so an array index maps to the same scene across submissions.
-mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
-    -printf '%h\n' | xargs -r -n1 basename | sort)
+discover_scenes
+select_scene
+PREPARED="$SCENE"
+SFM_OUT="$RESULT_ROOT/$SCENE_NAME/$SFM"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-turntable"
 
-if [ "${#SCENES[@]}" -eq 0 ]; then
-    echo "ERROR: no <scene>/prepared dirs under $DATA_ROOT" >&2
-    exit 2
-fi
-
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [ "$IDX" -ge "${#SCENES[@]}" ]; then
-    echo "ERROR: array index $IDX exceeds ${#SCENES[@]} scene(s): ${SCENES[*]}" >&2
-    exit 2
-fi
-
-SCENE_NAME="${SCENES[$IDX]}"
-PREPARED="$DATA_ROOT/$SCENE_NAME/prepared"
-SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
-OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-turntable"
-
-echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]})"
+echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"
 echo "output     : $OUT"
 
