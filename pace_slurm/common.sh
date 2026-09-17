@@ -41,8 +41,15 @@ case "$GPU" in
         GPU_ARCH="9.0"
         GRES_NAME="h100"
         ;;
+    # Blackwell, and the only card here that is NOT on ice-gpu: it lives on the ice-bw-gpu partition, so submit with --partition=ice-bw-gpu as well as the gres.
+    rtx_pro_6000)
+        CONDA_ENV="$CONDA_ROOT/augenblick_rtx_pro_6000"
+        CUDA_MODULE="cuda/12.9.1"
+        GPU_ARCH="12.0"
+        GRES_NAME="rtx_pro_6000_blackwell"
+        ;;
     *)
-        echo "ERROR: unknown GPU='$GPU' (valid: a100, l40s, a40, h100, h200)" >&2
+        echo "ERROR: unknown GPU='$GPU' (valid: a100, l40s, a40, h100, h200, rtx_pro_6000)" >&2
         exit 2
         ;;
 esac
@@ -152,6 +159,7 @@ echo "job        : ${SLURM_JOB_NAME:-interactive} (${SLURM_JOB_ID:-no-jobid})"
 echo "node       : $(hostname)"
 echo "started    : $(date -Is)"
 echo "gpu target : $GPU (sm_$GPU_ARCH, $CUDA_MODULE)"
+echo "gpu actual : ${GPU_SLICE:-$GPU}"
 echo "conda env  : $CONDA_ENV"
 echo "python     : $(python --version 2>&1) @ $(command -v python)"
 echo "repo       : $REPO_ROOT ($(git rev-parse --short HEAD 2>/dev/null || echo 'no git'))"
@@ -162,6 +170,14 @@ echo "=========================================================="
 # Each job appends one CSV row to $TIMING_CSV on exit.
 TIMING_DIR="${TIMING_DIR:-$RESULT_ROOT/_timing}"
 TIMING_CSV="${TIMING_CSV:-$TIMING_DIR/sfm_timings.csv}"
+
+GPU_SLICE="$GPU"
+if _mig="$(nvidia-smi -L 2>/dev/null | sed -n 's/.*MIG *\([0-9]\+g\.[0-9]\+gb\).*/\1/p' | head -1)" \
+   && [ -n "$_mig" ]; then
+    GPU_SLICE="${GPU}_${_mig}"
+fi
+unset _mig
+export GPU_SLICE
 
 _timing_finish() {
     local status=$?
@@ -183,7 +199,7 @@ _timing_finish() {
     fi
 
     mkdir -p "$TIMING_DIR"
-    echo "${SLURM_JOB_NAME:-interactive},${_TIMING_SCENE:-unknown},${_TIMING_NIMG:-0},${elapsed},${status},${note},${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0},$(hostname),$(date -Is)" >> "$TIMING_CSV"
+    echo "${SLURM_JOB_NAME:-interactive},${_TIMING_SCENE:-unknown},${GPU_SLICE:-$GPU},${_TIMING_NIMG:-0},${elapsed},${status},${note},${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0},$(hostname),$(date -Is)" >> "$TIMING_CSV"
 }
 
 # Armed by each job once it knows its scene, so the row carries the scene name.
@@ -193,7 +209,7 @@ start_timing() {
     _TIMING_START=$(date +%s)
     mkdir -p "$TIMING_DIR"
     if [ ! -f "$TIMING_CSV" ]; then
-        echo "method,scene,n_images,seconds,exit_code,note,jobid,node,finished" > "$TIMING_CSV"
+        echo "method,scene,gpu,n_images,seconds,exit_code,note,jobid,node,finished" > "$TIMING_CSV"
     fi
     trap _timing_finish EXIT
 }
