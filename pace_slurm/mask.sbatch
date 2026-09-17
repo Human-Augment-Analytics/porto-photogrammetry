@@ -5,6 +5,8 @@
 # Single scene: sbatch --array=N pace_slurm/mask.sbatch   (N = index in the sorted scene list)
 # MASK_METHOD selects the registered masking method (rembg|threshold).
 # Output goes to $RESULT_ROOT/<scene>/masked/<method>/, so the two methods can coexist.
+# Timing rows take the method from the job name, so to separate two methods in one CSV:
+#   MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch
 # U^2-Net is small and the stage is I/O-bound; any of a100/a40/l40s works.
 #SBATCH --job-name=mask
 #SBATCH --partition=ice-gpu
@@ -73,7 +75,7 @@ fi
 N_IMAGES="$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)"
 
 # Records elapsed time (and any OOM) for this scene, even if the job dies.
-start_timing "mask-$MASK_METHOD" "$N_IMAGES"
+start_timing "$SCENE_NAME" "$N_IMAGES"
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input      : $SCENE"

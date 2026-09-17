@@ -3,7 +3,7 @@
 # Turntable refines an existing COLMAP scene, so the input SfM is run first if it is absent.
 # Usage: sbatch pace_slurm/turntable_sfm.sbatch [extra turntable flags]
 # Single scene: sbatch --array=N pace_slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
-# SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
+# SFM selects which SfM result is refined: results/<scene>/<SFM>/ (default colmap).
 #SBATCH --job-name=turntable-sfm
 #SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
@@ -39,8 +39,8 @@ esac
 discover_scenes
 select_scene
 PREPARED="$SCENE"
-SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
-OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-turntable"
+SFM_OUT="$RESULT_ROOT/$SCENE_NAME/$SFM"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-turntable"
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"

@@ -66,7 +66,7 @@ class ColmapSfM(SfMMethod):
         ro.camera_model = self.config.camera_model
         eo = pycolmap.FeatureExtractionOptions()
         eo.max_image_size = self.config.max_image_size
-        eo.num_threads = 8
+        eo.num_threads = -1
 
         t = time.time()
         pycolmap.extract_features(db_path, str(out_dir / "images"),

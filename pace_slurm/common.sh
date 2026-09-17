@@ -109,7 +109,9 @@ discover_scenes() {
             ;;
         flat)
             # A scene is any dir holding images/; that skips stray files and manifests.
-            mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name images \
+
+            mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 \
+                \( -type d -o -xtype d \) -name images \
                 -printf '%h\n' | xargs -r -n1 basename | sort)
             ;;
         *)

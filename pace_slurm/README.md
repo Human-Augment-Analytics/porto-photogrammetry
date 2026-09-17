@@ -34,7 +34,10 @@ new scene-shaped output — an `images/` symlink plus `masks/` — to
 masked. It is the stage that *produces* masks, so it is the one job that does not need them
 present up front; `--only_missing` makes a requeued job resume where it stopped. The `rembg`
 method fails the job outright if onnxruntime cannot load its CUDA provider, rather than falling
-back to CPU at ~4x the cost.
+back to CPU at ~4x the cost. Its timing rows record the **scene** in the scene column, like
+every other job, and take the method from the `method` column — which is the Slurm job name. To
+tell two methods apart in one CSV, submit with a matching job name:
+`MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch`.
 
 `hull_sfm.sbatch` carves the visual hull from the masks and writes it as the initial point
 cloud. Its output differs from the input SfM only in `sparse/0/points3D.ply`, so running
@@ -63,7 +66,7 @@ checkout (which lives on scratch), not to absolute cluster paths:
 
 ```
 DATA_ROOT   = $REPO_ROOT/data/main      # <scene>/prepared/{images,masks}
-RESULT_ROOT = $REPO_ROOT/output         # <scene>/all/<sfm>[-<backend>]/
+RESULT_ROOT = $REPO_ROOT/output         # <scene>/<sfm>[-<backend>]/
 ```
 
 Override either in the environment to relocate. Prepared scenes are built with:
@@ -77,6 +80,17 @@ python pipeline/preparation/prepare_uf_dataset.py data/main/<scene>/images \
 `--include-unmatched` is required for scenes that ship **no masks** — without it every image is
 dropped and `prepared/images` comes out empty. Of the six scenes, only `TH24-21_Birdsnest`
 needs it.
+
+## Timing rows
+
+Every job appends one row to `$RESULT_ROOT/_timing/sfm_timings.csv`:
+`method,scene,gpu,n_images,seconds,exit_code,note,jobid,node,finished`. The `gpu` column records
+the hardware **actually allocated**, not the `GPU=` target: on a MIG-partitioned node it reads
+`<model>_<profile>` (e.g. `rtx_pro_6000_2g.48gb`) and on a whole card just `<model>`.
+
+This matters on `ice-bw-gpu`, where each node advertises **16** `rtx_pro_6000_blackwell` gres
+across 4 physical cards — so one gres is a MIG slice (2/12 of the SMs, 48 of 96 GB), not a card.
+Recording the bare model there would compare a fraction of a Blackwell against a whole L40S.
 
 ## Picking a GPU
 

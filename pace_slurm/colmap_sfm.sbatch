@@ -31,7 +31,7 @@ source "$SLURM_DIR/common.sh"
 
 discover_scenes
 select_scene
-OUT="$RESULT_ROOT/$SCENE_NAME/all/colmap"
+OUT="$RESULT_ROOT/$SCENE_NAME/colmap"
 mkdir -p "$OUT"
 
 # Records elapsed time (and any OOM) for this scene, even if the job dies.
