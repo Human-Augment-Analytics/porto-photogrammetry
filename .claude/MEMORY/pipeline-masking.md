@@ -53,14 +53,14 @@ fixing a fallback, delete `<output>/masks/` or drop the flag — a rerun alone w
 `rembg` infers at 1024² but returns a mask at **source resolution**, and `run()` passes that
 straight to `postprocess_mask` with no downscale — so `keep_largest`/`fill_holes` do morphology
 on 26 MP instead of 1 MP. On 6240×4160 images the per-image budget is ~2.2 s (L40S, measured
-over 4370 images):
+over 4370 images with `keep_largest` still on; the default path now skips its 0.23 s):
 
 | Stage | ~Time | Device |
 |-------|-------|--------|
 | `binary_fill_holes` | 1.70 s | CPU |
 | decode 26 MP JPEG → RGB | 0.57 s | CPU |
 | `write_mask` (`optimize=True`) | 0.32 s | CPU |
-| `ndimage.label` (`keep_largest`) | 0.23 s | CPU |
+| `ndimage.label` (`keep_largest`, off by default) | 0.23 s | CPU |
 | U²-Net inference | ~0.1–0.2 s | GPU |
 
 So the GPU is mostly idle and a masking job is CPU-bound — more `--cpus-per-task` helps, a
