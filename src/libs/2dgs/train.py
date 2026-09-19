@@ -10,7 +10,9 @@
 #
 
 import os
+import numpy as np
 import torch
+import torch.nn.functional as F
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -51,10 +53,34 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
+    # Optional annealed 3D hull-SDF penalty on Gaussian centres. Disabled unless
+    # hull_sdf_path is set and lambda_hull > 0, so default behaviour is unchanged.
+    hull_sdf_grid = None
+    hull_sdf_lo = hull_sdf_hi = None
+    if getattr(opt, "hull_sdf_path", "") and opt.lambda_hull > 0:
+        hull_data = np.load(opt.hull_sdf_path)
+        hull_sdf_grid = torch.from_numpy(hull_data["sdf"]).float().cuda()  # [D,H,W], z,y,x order
+        hull_sdf_lo = torch.from_numpy(hull_data["lo"]).float().cuda()
+        hull_sdf_hi = torch.from_numpy(hull_data["hi"]).float().cuda()
+        print(f"[hull-sdf] loaded {opt.hull_sdf_path}, grid {tuple(hull_sdf_grid.shape)}, "
+              f"lambda_hull={opt.lambda_hull} anneal={opt.hull_anneal_start_iter}->{opt.hull_anneal_end_iter}")
+
+    def sample_hull_sdf(mu):
+        # mu: [N,3] world xyz. Normalise to [-1,1] per axis for grid_sample, which expects
+        # query coords in (x,y,z) order against an input volume indexed [...,z,y,x].
+        norm = 2.0 * (mu - hull_sdf_lo) / (hull_sdf_hi - hull_sdf_lo) - 1.0
+        grid_in = hull_sdf_grid[None, None]  # [1,1,D,H,W]
+        coords = norm[None, :, None, None, :]  # [1,N,1,1,3]
+        sampled = F.grid_sample(grid_in, coords, mode="bilinear", padding_mode="border",
+                                 align_corners=True)
+        return sampled.view(-1)
+
     viewpoint_stack = None
     ema_loss_for_log = 0.0
     ema_dist_for_log = 0.0
     ema_normal_for_log = 0.0
+    ema_mask_for_log = 0.0
+    ema_hull_for_log = 0.0
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -110,8 +136,30 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         normal_loss = lambda_normal * (normal_error).mean()
         dist_loss = lambda_dist * (rend_dist).mean()
 
+        # One-sided dilated mask loss (Gaussian Surfels form): only penalise rendered alpha
+        # bleeding outside the dilated silhouette; never reward alpha inside it, which would
+        # fatten concavities instead of just killing floaters.
+        mask_loss = torch.tensor(0.0, device="cuda")
+        if gt_alpha is not None and opt.lambda_mask_hull > 0:
+            k = opt.mask_dilate_kernel
+            dilated_mask = F.max_pool2d(gt_alpha[None], kernel_size=k, stride=1, padding=k // 2)[0]
+            mask_loss = opt.lambda_mask_hull * torch.relu(alpha - dilated_mask).mean()
+
+        # Annealed 3D hull-SDF penalty on Gaussian centres.
+        hull_loss = torch.tensor(0.0, device="cuda")
+        if hull_sdf_grid is not None and iteration <= opt.hull_anneal_end_iter:
+            if iteration <= opt.hull_anneal_start_iter:
+                lam = opt.lambda_hull
+            else:
+                span = max(1, opt.hull_anneal_end_iter - opt.hull_anneal_start_iter)
+                frac = (iteration - opt.hull_anneal_start_iter) / span
+                lam = opt.lambda_hull * (1.0 - frac)
+            sdf = sample_hull_sdf(gaussians.get_xyz)
+            opacity = gaussians.get_opacity.squeeze(-1)
+            hull_loss = lam * (torch.relu(sdf) * opacity).mean()
+
         # loss
-        total_loss = loss + dist_loss + normal_loss
+        total_loss = loss + dist_loss + normal_loss + mask_loss + hull_loss
         
         total_loss.backward()
 
@@ -122,6 +170,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log
             ema_normal_for_log = 0.4 * normal_loss.item() + 0.6 * ema_normal_for_log
+            ema_mask_for_log = 0.4 * mask_loss.item() + 0.6 * ema_mask_for_log
+            ema_hull_for_log = 0.4 * hull_loss.item() + 0.6 * ema_hull_for_log
 
 
             if iteration % 10 == 0:
@@ -141,6 +191,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if tb_writer is not None:
                 tb_writer.add_scalar('train_loss_patches/dist_loss', ema_dist_for_log, iteration)
                 tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
+                tb_writer.add_scalar('train_loss_patches/mask_hull_loss', ema_mask_for_log, iteration)
+                tb_writer.add_scalar('train_loss_patches/hull_sdf_loss', ema_hull_for_log, iteration)
 
             training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations):
