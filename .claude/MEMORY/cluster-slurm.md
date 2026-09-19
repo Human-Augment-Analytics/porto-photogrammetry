@@ -24,39 +24,50 @@ partition, GPU selection, module names, conda root, data roots). Each dir has it
 - No `--account` line: ICE assigns the account (`coc-ice`) itself. Partition `ice-gpu` (16 h),
   with `ice-bw-gpu` (18 h) for the Blackwell nodes.
 - Selects a GPU with `--gres=gpu:<model>:1`, **not** a partition. Switching card means changing
-  the gres. Models on `ice-gpu`: `a100`, `l40s`, `h100`, `h200`, `a40`, `rtx_6000`, `v100`.
+  the gres. Per-model availability and counts: `pace_slurm/README.md`.
 - Conda root `$HOME/scratch/conda` (home is capped at 30 GB); all envs there are
   cu129 / torch 2.9.1 / numpy 2.x. `conda.sh` is not on the default
   path; `common.sh` sources it from the PACE anaconda install and takes a `CONDA_SH` override.
 - PACE has no `xerces`/`yasm` modules; nothing here needs them, so its `common.sh` omits them.
-- A100s are the scarce card (8 cluster-wide); `l40s`/`h200` queue far faster. Never submit a
-  bare `--gres=gpu:1` — the `mi210` nodes are AMD/ROCm and every CUDA backend fails there.
+- Never submit a bare `--gres=gpu:1` — the `mi210` nodes are AMD/ROCm and every CUDA backend
+  fails there.
 
-## Files (mirrored in both dirs)
+## Files
 
 | File | Role |
 |------|------|
-| `common.sh` | Sourced by every script: GPU switch, module loads, conda activate, banner |
+| `scene_common.sh` | Roots, scene discovery, banner, timing CSV. Sourced by the two setup files below, never by a job directly (PACE only) |
+| `common.sh` | GPU switch, module loads, conda activate; then sources `scene_common.sh` |
+| `meshroom_common.sh` | AliceVision env + sm gate (`MESHROOM_MAX_SM`); then sources `scene_common.sh` (PACE only) |
 | `template.sbatch` | Copy-and-edit starting point |
+| `mask.sbatch` | `MASK_METHOD=rembg\|threshold`; consumes `<scene>/images`, emits a scene |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |
-| `vggt_ba_sfm.sbatch` | Same with `--use_ba`, writing to `all/vggt_ba` |
+| `vggt_ba_sfm.sbatch` | Same with `--use_ba` |
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
+| `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |
 | `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw`, `SFM=<name>` picks the input SfM |
+| `meshroom_benchmark.sbatch` | Meshroom baseline (PACE only) |
 
-Two layout notes for any script chaining mask -> SfM -> recon over one scene. The neurips set is
-**flat** (`<scene>/{images,masks}`), not the nested `data/main` shape `common.sh` auto-detects,
-so `DATA_ROOT` must be exported *before* sourcing it. And keying outputs by GPU
-(`<root>/<gpu>/<scene>/...`) is what lets the same scene run on several cards without the runs
-overwriting each other.
+The `scene_common.sh` split exists because scene discovery, the array-index mapping and the
+timing CSV must be identical across methods for results to compare; environment setup is the
+one thing that legitimately differs, so it stays in the two callers. Callers set `GPU` and
+`CONDA_ENV` before sourcing, and may set `BANNER_EXTRA`.
+
+All job scripts take `--scene`/`--output` built from the scene roots, not positionals, and
+forward `"$@"` to the `augenblick` CLI. Scenes are **sorted**, so an array index maps to the
+same scene across submissions — which is why discovery must not silently skip any: it matches
+`images/` with `-type d -o -xtype d`, since a symlinked `images/` would otherwise drop the
+scene and shift every later index.
+
+Two layout notes for any script chaining mask -> SfM -> recon over one scene. A flat scene set
+(`<scene>/{images,masks}`) is auto-detected, but `DATA_ROOT` must be exported *before* sourcing
+if it differs from the default. And keying outputs by GPU (`<root>/<gpu>/<scene>/...`) is what
+lets the same scene run on several cards without the runs overwriting each other.
 
 COLMAP on ~660 images costs 1-3 h, so a chained script should reuse a converged `sparse/0`
 rather than redo it after a failure in a later stage — otherwise every recon-stage OOM or bad
 GPU pays for SfM twice.
-
-All job scripts take `--scene`/`--output` built from the scene roots, not positionals, and
-forward `"$@"` to the `augenblick` CLI. Scenes are discovered as `<scene>/prepared` dirs under
-`DATA_ROOT` and **sorted**, so an array index maps to the same scene across submissions.
 
 ## Masking stage
 
@@ -69,15 +80,27 @@ and drops to CPU. A one-line echo of the dir count beside the mask call makes th
 
 ## Data roots
 
-HiPerGator sets them per-sbatch as absolute paths; PACE centralises them in `common.sh` relative
-to the checkout (which lives on scratch). Override either in the environment to relocate.
+HiPerGator sets them per-sbatch as absolute paths; PACE centralises them in `scene_common.sh`
+relative to the checkout (which lives on scratch). Override either in the environment to relocate.
 
 | | HiPerGator | PACE ICE |
 |---|---|---|
 | `DATA_ROOT` | `/blue/arthur.porto/data/datasets/photogrammetry/main` | `$REPO_ROOT/data/main` |
 | `RESULT_ROOT` | `/blue/arthur.porto/srizvi63.gatech/results` | `$REPO_ROOT/output` |
 
-Layout is `<scene>/prepared/{images,masks}` in, `<scene>/all/<sfm>[-<backend>]/` out.
+In: `<scene>/prepared/{images,masks}` (nested) or `<scene>/{images,masks}` (flat), auto-detected.
+Out: `<scene>/<sfm>[-<backend>]/`.
+
+## Timing rows
+
+`scene_common.sh` appends one row per job to `$RESULT_ROOT/_timing/sfm_timings.csv`. Schema,
+columns and the MIG caveat: `pace_slurm/README.md`. Two traps that bite when editing it:
+
+- **The header is written only when the file does not exist**, so changing the schema silently
+  misaligns every CSV already on disk. Migrate them, or the two writers disagree.
+- **A timeout is invisible by exit code** — Slurm SIGTERMs at the time limit and bash's EXIT
+  trap then sees status 0. The trap greps the job's own `.err` for `DUE TO TIME LIMIT` before
+  trusting the status. Any new classification must go *before* the `$status -ne 0` check.
 
 ## GPU switch
 

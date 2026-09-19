@@ -1,8 +1,5 @@
 #!/bin/bash
 # Mask-aware COLMAP SfM for every scene under DATA_ROOT, one array task per scene.
-# Usage: sbatch pace_slurm/colmap_sfm.sbatch [extra flags]
-# Single scene: sbatch --array=N pace_slurm/colmap_sfm.sbatch   (N = index in the sorted scene list)
-# Uses pycolmap from the conda env; no colmap module is loaded.
 #SBATCH --job-name=colmap-sfm
 #SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
@@ -17,10 +14,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -28,13 +23,11 @@ if [ ! -f "$SLURM_DIR/common.sh" ]; then
 fi
 source "$SLURM_DIR/common.sh"
 
-
 discover_scenes
 select_scene
 OUT="$RESULT_ROOT/$SCENE_NAME/colmap"
 mkdir -p "$OUT"
 
-# Records elapsed time (and any OOM) for this scene, even if the job dies.
 start_timing "$SCENE_NAME" "$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)"
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]}) -> $OUT"

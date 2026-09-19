@@ -166,3 +166,6 @@ hpg_slurm/logs/
 pace_slurm/logs/
 
 pace_slurm_verify/
+
+# Generated tables/figures (not build products of the pipeline)
+artifacts/

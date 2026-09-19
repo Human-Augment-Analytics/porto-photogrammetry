@@ -25,13 +25,12 @@ scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
 
 `mask.sbatch` runs the masking stage and takes `MASK_METHOD=rembg|threshold` (default `rembg`)
 and `OUT_LAYOUT=nested|flat` (default `nested`). `nested` writes
-`<scene>/masked/<method>/` so the two methods coexist per scene; `flat` writes straight to
-`<scene>/`, which is convenient when `RESULT_ROOT` is already scoped to one run but means a
-second method silently overwrites the first.
+`$RESULT_ROOT/<method>/<scene>/` so the two methods coexist; `flat` writes straight to
+`$RESULT_ROOT/<scene>/`, which is convenient when `RESULT_ROOT` is already scoped to one run
+but means a second method silently overwrites the first.
 Unlike every other job here it consumes `<scene>/images` rather than a whole scene, and writes a
-new scene-shaped output — an `images/` symlink plus `masks/` — to
-`$RESULT_ROOT/<scene>/masked/<method>/`. Point the SfM jobs at that directory to run them
-masked. It is the stage that *produces* masks, so it is the one job that does not need them
+new scene-shaped output — an `images/` symlink plus `masks/`. Point the SfM jobs at that
+directory to run them masked. It is the stage that *produces* masks, so it is the one job that does not need them
 present up front; `--only_missing` makes a requeued job resume where it stopped. The `rembg`
 method fails the job outright if onnxruntime cannot load its CUDA provider, rather than falling
 back to CPU at ~4x the cost. Its timing rows record the **scene** in the scene column, like
@@ -44,7 +43,64 @@ cloud. Its output differs from the input SfM only in `sparse/0/points3D.ply`, so
 `recon.sbatch` against both gives an initialisation ablation with poses, intrinsics and the
 training schedule held fixed. It needs masks and will refuse to run without them.
 
+**VGGT is VRAM-hungry.** It loads every image at 1024² in a single batch with no chunking, so
+VRAM scales with scene size: on the 48 GB L40S it OOM'd on all 47 NeurIPS scenes, and even on a
+141 GB H200 it OOM's above ~276 images. BA needs at least as much again. Run it on the largest
+card available, and expect the biggest scenes to fail regardless.
+
+**Unmasked BA fails on most scenes.** 36 of 47 died with *No reconstruction can be built with
+BA* — the tracker found too few surviving correspondences. Masking first fixes it: confining
+query points to the specimen is what the larger `max_query_pts` budget in `VGGTConfig` is sized
+for. Run `mask.sbatch`, then point `vggt_ba_sfm.sbatch` at the masked scenes.
+
+To rerun a method on a different card without clobbering the first run, override the gres and
+give the job a distinct name and output dir — the `method` column is the Slurm job name, so the
+two runs stay separable in one CSV:
+
+```bash
+GPU=h200 RESULT_ROOT=output/h200 sbatch --gres=gpu:h200:1 \
+    --job-name=vggt-sfm-h200 pace_slurm/vggt_sfm.sbatch
+```
+
 For anything not covered, copy `template.sbatch` and edit its command block.
+
+## Shared job setup
+
+`scene_common.sh` holds what must be identical across methods for their results to be
+comparable: root resolution, scene discovery, the array-index → scene mapping, the run
+banner, and the timing CSV. It is not sourced directly by a job — `common.sh` (torch/CUDA)
+and `meshroom_common.sh` (AliceVision) each set up their own environment and then source it.
+Callers set `GPU` and `CONDA_ENV` first, and may set `BANNER_EXTRA` to splice extra
+`label: value` lines into the banner.
+
+Scene discovery matches `images/` via `-type d -o -xtype d`: a scene's `images/` is often a
+symlink into shared storage, and matching only real dirs would silently drop those scenes and
+shift every later array index — so task *N* would mean a different scene in different jobs.
+
+## Meshroom baseline
+
+`meshroom_benchmark.sbatch` sources `meshroom_common.sh`, not `common.sh`, for three reasons:
+the frontend is a single GPU-independent env (`$CONDA_ROOT/meshroom`, pure Python) rather than
+one env per GPU; AliceVision 3.3.0's tarball bundles its own `libcudart.so.12.1.105`, so
+loading a CUDA module would shadow it; and the `ALICEVISION_*` variables live only in
+`~/.bashrc`, which a batch job never sources.
+
+**Supported GPUs: `v100`, `rtx_6000`, `a100`, `a40`, `l40s`, `h100`, `h200`,
+`rtx_pro_6000_blackwell`.** The prebuilt kernels are SASS-only to sm_90, but AliceVision bundles
+`libnvrtc` and compiles DepthMap kernels at runtime, so newer cards work — verified on sm_120.
+`MESHROOM_MAX_SM` gates this; `mi210` (AMD/ROCm) is rejected outright.
+
+**It runs one scene at a time (`--array=...%1`), deliberately.** `MeshroomCache` reaches
+~50 GB for a 663-image scene against a 300 GB Lustre quota; running 8-wide exhausted the quota
+and killed the whole array. `benchmark_meshroom.py` prunes the cache to just the textured mesh
+after each successful scene, so only one scene's intermediates exist at a time. Check headroom
+with `lfs quota -h -u $USER /storage/ice1` — **not** `df`, which reports the filesystem's free
+space and says nothing about your quota.
+
+DepthMap is host-bound: `computeOnMultiGPUs.cpp` runs one OMP thread per GPU, not per core, and
+the 64 KB constant-memory limit clamps batching identically on every card. Extra cores only
+help FeatureExtraction and Texturing. An A40 measured *faster* than an H200 here (10.1 vs
+12.9 s/depth map), so prefer the more available card.
 
 ## Cluster specifics
 
@@ -149,3 +205,6 @@ sacct -j <jobid> --format=JobID,JobName,State,Elapsed,MaxRSS
 - **COLMAP is intentionally not module-loaded.** Every SfM path drives the `pycolmap` Python API from the conda env, so no COLMAP binary is needed anywhere.
 - **The jobs call the bare `augenblick` console script**, so the package must be installed (`pip install -e . --no-deps --no-build-isolation`) into each per-GPU conda env.
 - **Never run `scripts/setup_*.sh` from two concurrent jobs against one checkout** — they race on the same `build/` dirs and silently reuse stale artifacts. Use a separate checkout per parallel build. Training jobs sharing a checkout are fine.
+- **`setup_env.sbatch`'s gres must name the same card as `GPU=`.** The CUDA rasterizers compile for the arch of the node they build on, so a mismatch yields an env that imports cleanly and fails at kernel launch. The script refuses a mismatch rather than letting it through. Wrapper names do not always match the GPU: H200 shares sm_9.0 with H100 and so uses `scripts/setup_h100.sh`.
+- **`rembg` falls back to CPU silently** (~4x slower) when onnxruntime cannot load its CUDA provider, and `--only_missing` then reuses those slow masks on every later run. `mask.sbatch` fails the job outright rather than letting that happen; if you drive the masking stage yourself, log the active provider. `rembg` also fetches its model to `~/.u2net/` on first use — warm it on a login node if the compute nodes have no outbound network.
+- **A timeout is invisible by exit code.** Slurm SIGTERMs at the time limit, and bash's EXIT trap then sees status 0, so a timed-out job looks like a successful one. `scene_common.sh` greps the job's own `.err` for `DUE TO TIME LIMIT` before trusting the status, and records `KILLED_OR_TIMEOUT` with exit code 124.
