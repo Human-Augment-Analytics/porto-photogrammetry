@@ -190,6 +190,7 @@ def test_parser_accepts_mask_with_images():
 
 
 def test_parser_rejects_mask_with_scene():
+    # --images is supplied so the only thing left to fail on is the unrecognised --scene.
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["mask", "threshold", "--scene", "x", "--output", "y"])
+            ["mask", "threshold", "--images", "x", "--scene", "x", "--output", "y"])

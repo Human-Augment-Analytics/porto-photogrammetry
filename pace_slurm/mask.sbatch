@@ -4,7 +4,7 @@
 # Usage: MASK_METHOD=rembg sbatch pace_slurm/mask.sbatch [extra flags]
 # Single scene: sbatch --array=N pace_slurm/mask.sbatch   (N = index in the sorted scene list)
 # MASK_METHOD selects the registered masking method (rembg|threshold).
-# Output goes to $RESULT_ROOT/<scene>/masked/<method>/, so the two methods can coexist.
+# Output goes to $RESULT_ROOT/<method>/<scene>/, so the two methods can coexist.
 # Timing rows take the method from the job name, so to separate two methods in one CSV:
 #   MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch
 # U^2-Net is small and the stage is I/O-bound; any of a100/a40/l40s works.
@@ -58,11 +58,11 @@ select_scene
 
 # Masking reads images/ and writes its own scene, so unlike the SfM jobs it needs no masks/
 # in the input — it is the stage that produces them.
-#   nested (default) : <scene>/masked/<method>/  — rembg and threshold coexist per scene
+#   nested (default) : <method>/<scene>/  — rembg and threshold coexist per scene
 #   flat             : <scene>/                  — one method per scene; a second OVERWRITES
 OUT_LAYOUT="${OUT_LAYOUT:-nested}"
 case "$OUT_LAYOUT" in
-    nested) OUT="$RESULT_ROOT/$SCENE_NAME/masked/$MASK_METHOD" ;;
+    nested) OUT="$RESULT_ROOT/$MASK_METHOD/$SCENE_NAME" ;;
     flat)   OUT="$RESULT_ROOT/$SCENE_NAME" ;;
     *) echo "ERROR: unknown OUT_LAYOUT='$OUT_LAYOUT' (valid: nested, flat)" >&2; exit 2 ;;
 esac

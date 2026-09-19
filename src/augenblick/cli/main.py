@@ -3,6 +3,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from augenblick.core.config import add_dataclass_arguments
 from augenblick.core.errors import BackendError, MethodNotFound, SceneError
@@ -10,9 +11,7 @@ from augenblick.core.registry import (
     MASK_REGISTRY,
     RECONSTRUCTION_REGISTRY,
     SFM_REGISTRY,
-    get_mask,
-    get_reconstruction,
-    get_sfm,
+    get_method,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,29 +22,37 @@ import augenblick.reconstruction  # noqa: E402,F401
 import augenblick.sfm  # noqa: E402,F401
 
 
+class Stage(NamedTuple):
+    """What the CLI needs to build and resolve one stage."""
+
+    registry: dict[str, type]
+    kind: str
+    help: str
+    input_flag: str
+    input_help: str
+
+
 # One entry per stage; adding a stage is one edit here.
-#     stage -> (registry, getter, help, input_flag, input_help)
-STAGES: dict[str, tuple[dict[str, type], object, str, str, str]] = {
-    "mask": (MASK_REGISTRY, get_mask, "Run a masking method",
-             "--images", "Input directory of .jpg/.JPG/.jpeg photographs"),
-    "sfm": (SFM_REGISTRY, get_sfm, "Run an SfM method",
-            "--scene", "Input scene directory"),
-    "recon": (RECONSTRUCTION_REGISTRY, get_reconstruction,
-              "Run a reconstruction backend", "--scene", "Input scene directory"),
+STAGES: dict[str, Stage] = {
+    "mask": Stage(MASK_REGISTRY, "mask", "Run a masking method",
+                  "--images", "Input directory of .jpg/.JPG/.jpeg photographs"),
+    "sfm": Stage(SFM_REGISTRY, "SfM", "Run an SfM method",
+                 "--scene", "Input scene directory"),
+    "recon": Stage(RECONSTRUCTION_REGISTRY, "reconstruction",
+                   "Run a reconstruction backend", "--scene", "Input scene directory"),
 }
 
 
-def _add_stage_parser(subparsers, stage: str, registry: dict[str, type],
-                      help_text: str, input_flag: str, input_help: str):
+def _add_stage_parser(subparsers, stage_name: str, stage: Stage):
     """Build the parser for one stage, with a per-method subparser drawn from the registry."""
-    parser = subparsers.add_parser(stage, help=help_text)
+    parser = subparsers.add_parser(stage_name, help=stage.help)
     parser.set_defaults(stage_parser=parser)
     parser.add_argument("--list", action="store_true", help="List available methods and exit")
     method_subs = parser.add_subparsers(dest="method")
-    for name, cls in sorted(registry.items()):
+    for name, cls in sorted(stage.registry.items()):
         sub = method_subs.add_parser(name, help=cls.__doc__)
-        sub.add_argument(input_flag, dest="input_dir", type=Path, required=True,
-                         help=input_help)
+        sub.add_argument(stage.input_flag, dest="input_dir", type=Path, required=True,
+                         help=stage.input_help)
         sub.add_argument("--output", type=Path, required=True, help="Output directory")
         add_dataclass_arguments(sub, cls.config_cls)
     return parser
@@ -58,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Masking, SfM initialisation, and Gaussian-primitive surface reconstruction.",
     )
     subparsers = parser.add_subparsers(dest="stage")
-    for stage, (reg, _, help_text, flag, help_flag) in STAGES.items():
-        _add_stage_parser(subparsers, stage, reg, help_text, flag, help_flag)
+    for name, stage in STAGES.items():
+        _add_stage_parser(subparsers, name, stage)
     return parser
 
 
@@ -89,15 +96,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
 
-    registry, getter, _, _, _ = STAGES[args.stage]
+    stage = STAGES[args.stage]
     if getattr(args, "list", False):
-        return _list_methods(registry)
+        return _list_methods(stage.registry)
     if args.method is None:
         args.stage_parser.print_help()
         return 2
 
     try:
-        cls = getter(args.method)
+        cls = get_method(stage.registry, args.method, stage.kind)
     except MethodNotFound as exc:
         logger.error(str(exc))
         return 2

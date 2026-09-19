@@ -153,6 +153,16 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
                 except Exception as exc:
                     logger.warning(f"{path.name}: mask_for raised {type(exc).__name__}: {exc}")
                     result.num_failed += 1
+                    dest.unlink(missing_ok=True)
+                    continue
+
+                with Image.open(path) as im:
+                    expected = im.size[::-1]
+                if mask.shape != expected:
+                    logger.warning(
+                        f"{path.name}: mask is {mask.shape}, expected {expected} — rejected")
+                    result.num_failed += 1
+                    dest.unlink(missing_ok=True)
                     continue
 
                 mask = postprocess_mask(mask, cfg.keep_largest, cfg.fill_holes)
@@ -162,6 +172,7 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
                         f"{path.name}: foreground fraction {frac:.3f} out of "
                         f"[{cfg.min_foreground}, {cfg.max_foreground}] — rejected")
                     result.num_failed += 1
+                    dest.unlink(missing_ok=True)
                     continue
 
                 write_mask(mask, dest)
