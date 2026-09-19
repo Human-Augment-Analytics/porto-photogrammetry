@@ -1,8 +1,6 @@
 #!/bin/bash
 # COLMAP -> visual-hull initialisation for every scene under DATA_ROOT, one array task per scene.
 # Hull refines an existing COLMAP scene, so the input SfM is run first if it is absent.
-# Usage: sbatch pace_slurm/hull_sfm.sbatch [extra hull flags]
-# Single scene: sbatch --array=N pace_slurm/hull_sfm.sbatch   (N = index in the sorted scene list)
 # SFM selects which SfM result is refined: results/<scene>/<SFM>/ (default colmap).
 # Output differs from the input only in sparse/0/points3D.ply, so feeding both to recon.sbatch
 # gives an initialisation ablation with poses, intrinsics and training schedule held fixed.
@@ -20,10 +18,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -36,7 +32,6 @@ case "$SFM" in
     colmap|vggt|vggt_ba) ;;
     *) echo "ERROR: unknown SFM='$SFM' (valid: colmap, vggt, vggt_ba)" >&2; exit 2 ;;
 esac
-
 
 # Sorted so an array index maps to the same scene across submissions.
 mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \

@@ -1,7 +1,5 @@
 #!/bin/bash
 # Gaussian reconstruction for every scene under DATA_ROOT, one array task per scene.
-# Usage: BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch [extra flags]
-# Single scene: sbatch --array=N pace_slurm/recon.sbatch   (N = index in the sorted scene list)
 # BACKEND selects the registered reconstruction backend (2dgs|sugar|pgsr|gw).
 # SFM selects which SfM result feeds it: results/<scene>/<SFM>/.
 #SBATCH --job-name=recon
@@ -18,10 +16,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -36,7 +32,6 @@ case "$BACKEND" in
 esac
 
 SFM="${SFM:-vggt}"
-
 
 discover_scenes
 select_scene

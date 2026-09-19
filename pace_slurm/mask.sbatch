@@ -1,13 +1,6 @@
 #!/bin/bash
 # Masking stage for every scene under DATA_ROOT, one array task per scene.
-# Produces a scene-shaped output (images/ symlink + masks/) that sfm/recon consume directly.
-# Usage: MASK_METHOD=rembg sbatch pace_slurm/mask.sbatch [extra flags]
-# Single scene: sbatch --array=N pace_slurm/mask.sbatch   (N = index in the sorted scene list)
-# MASK_METHOD selects the registered masking method (rembg|threshold).
-# Output goes to $RESULT_ROOT/<method>/<scene>/, so the two methods can coexist.
-# Timing rows take the method from the job name, so to separate two methods in one CSV:
-#   MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch
-# U^2-Net is small and the stage is I/O-bound; any of a100/a40/l40s works.
+# MASK_METHOD=rembg|threshold. See "mask.sbatch" in README.md.
 #SBATCH --job-name=mask
 #SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
@@ -22,10 +15,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -74,7 +65,6 @@ if [ ! -d "$SCENE/images" ]; then
 fi
 N_IMAGES="$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)"
 
-# Records elapsed time (and any OOM) for this scene, even if the job dies.
 start_timing "$SCENE_NAME" "$N_IMAGES"
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
