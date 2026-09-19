@@ -44,8 +44,8 @@ if [ ! -f "$MESHROOM_ROOT/bin/meshroom_batch" ]; then
     exit 2
 fi
 
-# --- GPU support gate (sm_90 ceiling; see README.md) ------------------------
-MESHROOM_MAX_SM="${MESHROOM_MAX_SM:-90}"
+# --- GPU support gate (see "Supported GPUs" in README.md) -------------------
+MESHROOM_MAX_SM="${MESHROOM_MAX_SM:-120}"
 
 # Compute capability as sm_XX*10; -1 = not CUDA at all.
 gpu_supported() {
@@ -77,9 +77,8 @@ if [ "$_sm" -lt 0 ]; then
 elif [ "$_sm" -eq 0 ]; then
     echo "WARNING: unrecognised GPU='$GPU'; cannot verify AliceVision supports it" >&2
 elif [ "$_sm" -gt "$MESHROOM_MAX_SM" ]; then
-    echo "ERROR: GPU='$GPU' is sm_$_sm, above AliceVision 3.3.0's sm_$MESHROOM_MAX_SM ceiling" >&2
-    echo "       Its kernels are SASS-only (no PTX), so DepthMap cannot JIT onto this device." >&2
-    echo "       Use v100, rtx_6000, a100, a40, l40s, h100, or h200." >&2
+    echo "ERROR: GPU='$GPU' is sm_$_sm, above the tested sm_$MESHROOM_MAX_SM" >&2
+    echo "       Untested, not known-broken: set MESHROOM_MAX_SM=$_sm to try it." >&2
     exit 2
 fi
 unset _sm
@@ -102,7 +101,7 @@ conda activate "$CONDA_ENV"
 export PYTHONPATH="$MESHROOM_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 # scene_common.sh reads GPU and CONDA_ENV; BANNER_EXTRA adds AliceVision provenance.
-BANNER_EXTRA="gpu target : $GPU (AliceVision ceiling sm_$MESHROOM_MAX_SM, bundled CUDA 12.1)
+BANNER_EXTRA="gpu target : $GPU (AliceVision max sm_$MESHROOM_MAX_SM, bundled CUDA 12.1 + nvrtc)
 alicevision: $ALICEVISION_ROOT
 meshroom   : $MESHROOM_ROOT ($(git -C "$MESHROOM_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'no git'))"
 

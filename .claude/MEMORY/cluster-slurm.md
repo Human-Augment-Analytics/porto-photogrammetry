@@ -38,7 +38,7 @@ partition, GPU selection, module names, conda root, data roots). Each dir has it
 |------|------|
 | `scene_common.sh` | Roots, scene discovery, banner, timing CSV. Sourced by the two setup files below, never by a job directly (PACE only) |
 | `common.sh` | GPU switch, module loads, conda activate; then sources `scene_common.sh` |
-| `meshroom_common.sh` | AliceVision env + sm ceiling gate; then sources `scene_common.sh` (PACE only) |
+| `meshroom_common.sh` | AliceVision env + sm gate (`MESHROOM_MAX_SM`); then sources `scene_common.sh` (PACE only) |
 | `template.sbatch` | Copy-and-edit starting point |
 | `mask.sbatch` | `MASK_METHOD=rembg\|threshold`; consumes `<scene>/images`, emits a scene |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |

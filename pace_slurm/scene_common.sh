@@ -114,8 +114,8 @@ _timing_finish() {
     fi
 
     if [ -z "$note" ] && [ "$status" -ne 0 ]; then
-        # No SASS for this device and no PTX to JIT from - AliceVision's sm_90
-        # ceiling. Never matches for the torch jobs.
+        # No SASS for this device and no runtime compile to fall back on.
+        # Never matches for the torch jobs.
         if [ -f "$log" ] && grep -qiE "no kernel image is available" "$log"; then
             note="UNSUPPORTED_ARCH"
         elif [ -f "$log" ] && grep -qiE "CUDA out of memory|CUBLAS_STATUS_ALLOC_FAILED|torch\.OutOfMemoryError" "$log"; then

@@ -85,11 +85,10 @@ one env per GPU; AliceVision 3.3.0's tarball bundles its own `libcudart.so.12.1.
 loading a CUDA module would shadow it; and the `ALICEVISION_*` variables live only in
 `~/.bashrc`, which a batch job never sources.
 
-**Supported GPUs: `v100`, `rtx_6000`, `a100`, `a40`, `l40s`, `h100`, `h200`.** AliceVision's
-prebuilt kernels are SASS-only up to sm_90 with **no PTX** (verified with `cuobjdump` on
-`libaliceVision_depthMap.so`, `libpopsift.so`, `libCCTag.so`). No PTX means no JIT, so a newer
-device cannot fall back — DepthMap dies with *no kernel image is available for execution on
-the device*. `rtx_pro_6000_blackwell` (sm_120) and `mi210` (AMD) are rejected up front.
+**Supported GPUs: `v100`, `rtx_6000`, `a100`, `a40`, `l40s`, `h100`, `h200`,
+`rtx_pro_6000_blackwell`.** The prebuilt kernels are SASS-only to sm_90, but AliceVision bundles
+`libnvrtc` and compiles DepthMap kernels at runtime, so newer cards work — verified on sm_120.
+`MESHROOM_MAX_SM` gates this; `mi210` (AMD/ROCm) is rejected outright.
 
 **It runs one scene at a time (`--array=...%1`), deliberately.** `MeshroomCache` reaches
 ~50 GB for a 663-image scene against a 300 GB Lustre quota; running 8-wide exhausted the quota
