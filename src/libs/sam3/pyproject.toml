@@ -26,7 +26,6 @@ classifiers = [
 ]
 dependencies = [
     "timm>=1.0.17",
-    "numpy>=1.26,<2",
     "tqdm",
     "ftfy==6.1.1",
     "regex",
@@ -46,8 +45,6 @@ dev = [
     "gitpython==3.1.31",
     "yt-dlp",
     "pandas",
-    "opencv-python",
-    "pycocotools",
     "numba",
     "python-rapidjson",
 ]
@@ -58,9 +55,7 @@ notebooks = [
     "ipywidgets",
     "ipycanvas",
     "ipympl",
-    "pycocotools",
     "decord",
-    "opencv-python",
     "einops",
     "scikit-image",
     "scikit-learn",

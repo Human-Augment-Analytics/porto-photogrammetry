@@ -37,10 +37,10 @@ partition, GPU selection, module names, conda root, data roots). Each dir has it
 | File | Role |
 |------|------|
 | `scene_common.sh` | Roots, scene discovery, banner, timing CSV. Sourced by the two setup files below, never by a job directly (PACE only) |
-| `common.sh` | GPU switch, module loads, conda activate; then sources `scene_common.sh` |
+| `common.sh` | GPU switch, module loads, `HF_HOME`/`TORCH_HOME` exports, conda activate; then sources `scene_common.sh` |
 | `meshroom_common.sh` | AliceVision env + sm gate (`MESHROOM_MAX_SM`); then sources `scene_common.sh` (PACE only) |
 | `template.sbatch` | Copy-and-edit starting point |
-| `mask.sbatch` | `MASK_METHOD=rembg\|threshold`; consumes `<scene>/images`, emits a scene |
+| `mask.sbatch` | `MASK_METHOD=rembg\|threshold\|sam3`; consumes `<scene>/images`, emits a scene. `sam3` preflights CUDA |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |
 | `vggt_ba_sfm.sbatch` | Same with `--use_ba` |
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
@@ -123,6 +123,9 @@ sm_8.9 card (L40S, L40, RTX 6000 Ada) — the RTX 6000 Ada is a *different* card
 - **No `module load colmap/3.11`, no `export -f colmap`.** Every SfM path goes through the
   `pycolmap` Python API from the conda env and never shells out, so no COLMAP binary is needed.
 - `module purge` first, since a batch shell inherits no `~/.bashrc`.
+- For the same reason `common.sh` exports `HF_HOME`/`TORCH_HOME` to `$HOME/scratch/`
+  (both overridable). Without them every checkpoint-fetching job (VGGT ~4 GB, SAM 3 ~2 GB)
+  re-downloads into `$HOME/.cache`, against a 30 GB home quota.
 - `conda activate` requires sourcing `conda.sh` first in a non-interactive shell.
 - `--mem` set explicitly (the interactive `salloc` let it default): 24 gb for SfM jobs, 64 gb for
   reconstruction and the template. **64 gb is not enough for 2DGS mesh extraction on a ~660-image

@@ -131,12 +131,13 @@ The editable installs carry their own dependency lists, which the constraint fil
   upstream hard-pinned `numpy==1.26.4` here, which made the numpy-2 wrappers abort at stage 3
   with `ResolutionImpossible`. It is now unpinned locally; **keep it unpinned when syncing from
   upstream VGGT.** Upstream also listed plain `onnxruntime`, which was **removed locally** —
-  stage 3/8 installs VGGT *after* stage 2/8's `requirements.txt`, so that entry silently
+  stage 3/9 installs VGGT *after* stage 2/9's `requirements.txt`, so that entry silently
   reinstalled the CPU onnxruntime over `onnxruntime-gpu` and cost `CUDAExecutionProvider` (both
   share one `onnxruntime/` directory, so uninstalling the CPU package alone breaks the import
   entirely). Nothing under `src/libs/vggt/` imports it, and the top-level `requirements.txt`
   pin still serves `visual_util.py`'s skyseg path. **Keep it out when syncing from upstream.**
 - `src/libs/light_glue/requirements.txt` — `kornia>=0.6.11`, `opencv-python`, unpinned `torch`.
+- `src/libs/sam3` — installed at stage 4/9 with `--no-deps`, because its upstream list would pull torch/numpy and break the pins. Its three real runtime deps (`timm`, `ftfy`, `regex`) are installed explicitly, also `--no-deps`, and are mirrored in `requirements.txt`.
 - `src/libs/pytorch3d` — `install_requires=["iopath"]`.
 - `tetra_triangulation` — `trimesh>=3.20.2`.
 - The eight CUDA rasterizers declare **no** Python deps; they are unaffected by numpy pins

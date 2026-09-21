@@ -1,5 +1,6 @@
 # Sourced by every sbatch script except the Meshroom baseline: selects GPU, loads
-# modules, activates conda, then sources scene_common.sh. Not executable on its own.
+# modules, exports the scratch model caches, activates conda, then sources scene_common.sh.
+# Not executable on its own.
 # Set GPU=a100|l40s|a40 before submitting to switch targets.
 
 set -euo pipefail
@@ -55,6 +56,11 @@ esac
 # A batch shell does not source ~/.bashrc, so load the toolchain explicitly.
 module purge
 module load "$CUDA_MODULE"
+
+# Same reason: the model caches set in ~/.bashrc are not inherited either, and home is capped
+# at 30 GB. Without these, every job re-downloads its multi-GB checkpoint into $HOME/.cache.
+export HF_HOME="${HF_HOME:-$HOME/scratch/huggingface/}"
+export TORCH_HOME="${TORCH_HOME:-$HOME/scratch/torch/}"
 CONDA_SH="${CONDA_SH:-/usr/local/pace-apps/manual/packages/anaconda3/2023.03/etc/profile.d/conda.sh}"
 
 if [ ! -d "$CONDA_ENV" ]; then

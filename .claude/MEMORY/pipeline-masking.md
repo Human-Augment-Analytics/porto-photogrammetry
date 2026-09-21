@@ -39,6 +39,24 @@ disable masking while looking successful).
 - **`threshold`**: classical Otsu / GrabCut, CPU-only, no new dependency (cv2/skimage/scipy,
   all already pinned). Key flags: `--mode {otsu,grabcut}`, `--polarity {auto,dark-background,
   light-background}` (auto picks per image via border-vs-centre luminance), `--downscale`.
+- **`sam3`**: concept-prompted instance segmentation (SAM 3, Meta). A **text prompt** selects what to segment, so it discriminates where a matting model cannot — `skeleton` isolates a specimen and leaves scale bars out of the mask. GPU-only. Key flags: `--prompt` (default `skeleton`), `--score_threshold` (default 0.5), `--max_detections` (0 = keep all above threshold), `--checkpoint_path`, `--device`, `--batch_log_every`.
+
+  All detections surviving the threshold are **unioned** not argmaxed — a specimen routinely returns as several instances (cranium, mandible) and taking only the top score would drop the rest.
+
+### `sam3` traps
+
+- **bfloat16 autocast is mandatory and undocumented.** Without `torch.autocast(device_type, dtype=torch.bfloat16)` every image dies with `mat1 and mat2 must have the same dtype`. Upstream only shows this in `sam3/scripts/*.py`, not in the README or the processor docstring.
+- **Cast off bfloat16 before `.numpy()`**, or numpy raises `Got unsupported ScalarType BFloat16`. The fix for the previous trap exposes this one.
+- **Check for zero detections before reshaping**, else an empty result raises `cannot reshape array of size 0` instead of the intended `SceneError`.
+- **`build_sam3_image_model(device="cpu")` does not work** — `position_encoding.py` and `decoder.py` hardcode `device="cuda"`. Fetch the checkpoint with `hf download` or inside the job; do not try to build the model on a login node.
+- The checkpoint comes from the **gated** HF repo `facebook/sam3` (needs `hf auth login`). Downloading it on a PACE login node gets OOM-killed by the cgroup cap; fetch it in a batch job. Note that `.incomplete` blobs make `du` report progress while `snapshots/` is still empty, so size is not a completion check.
+
+`src/libs/sam3` is a **trimmed vendored copy**: the upstream tracking, video, training and eval
+paths are removed (284 files/11 MB → 31 `.py`/1.9 MB), leaving `sam3/{model,perflib,sam,assets}`.
+Local deviations are marked `LOCAL PATCH (augenblick)` — chiefly a `pkg_resources` shim onto
+`importlib.resources` (setuptools ≥ 81 dropped it) and two training-only branches converted to
+`NotImplementedError`. `perflib/fa3.py` looks unused by static analysis but is lazily imported
+on Hopper and must stay. Rationale and the full prune list: `.claude/PLANS/sam3-masking-method.md`.
 
 Shared flags (both methods): `--only_missing` (underscore, not `--only-missing`; resume, skips
 images that already have a mask), `--min_foreground`/`--max_foreground` (reject bounds),
@@ -69,6 +87,9 @@ bigger card does not. Postprocessing at model resolution and upscaling afterward
 behaviour change to validate visually, not a free win. Verified against base.py and a timed run
 of the 10-scene neurips subset.
 
+`sam3` is the exception: **1.60 s/image** on an L40S (432 images, 6240×4160), faster end-to-end
+than `rembg` despite running a far larger model, because it does no `binary_fill_holes` pass.
+
 ## Why the stage exists
 
 9 of 47 neurips scenes ship no masks, all ≥432 images. Masked BA needs masks; `sfm hull`
@@ -81,3 +102,7 @@ Runs against the per-GPU `augenblick_*` env like every other stage — `rembg` a
 `onnxruntime-gpu` are ordinary `requirements.txt` entries, so there is no separate masking env.
 A masking job should still guard against silent CPU fallback, since ORT reports the CUDA
 provider as available even when it cannot load it. See cluster-slurm.md and environment-and-gpu.md.
+
+`pace_slurm/mask.sbatch` takes `MASK_METHOD=rembg|threshold|sam3`. For `sam3` it preflights
+CUDA, because the method cannot fall back to CPU. The checkpoint lands in `$HF_HOME`, which
+`common.sh` exports for every job (see cluster-slurm.md).

@@ -54,20 +54,25 @@ banner "Submodules"
 git submodule update --init src/libs/light_glue src/libs/pytorch3d
 
 # --- 1. PyTorch (arch-specific wheel index) -----------------------------------
-banner "1/8 PyTorch"
+banner "1/9 PyTorch"
 $PIP install $TORCH_SPEC --index-url "$TORCH_INDEX_URL"
 
 # --- 2. PyPI dependencies (repo requirements.txt) -----------------------------
-banner "2/8 requirements.txt"
+banner "2/9 requirements.txt"
 $PIP install -r requirements.txt
 
 # --- 3. Editable source packages: VGGT + LightGlue ----------------------------
-banner "3/8 VGGT + LightGlue (editable)"
+banner "3/9 VGGT + LightGlue (editable)"
 $PIP install -e src/libs/vggt       --no-build-isolation
 $PIP install -e src/libs/light_glue --no-build-isolation
 
-# --- 4. pytorch3d (source build, arch-agnostic; or prebuilt wheel) ------------
-banner "4/8 pytorch3d"
+# --- 4. SAM 3 (concept-prompted masking) --------------------------------------
+banner "4/9 SAM 3 (editable, --no-deps)"
+$PIP install timm ftfy regex --no-deps
+$PIP install -e src/libs/sam3 --no-deps --no-build-isolation
+
+# --- 5. pytorch3d (source build, arch-agnostic; or prebuilt wheel) ------------
+banner "5/9 pytorch3d"
 if [ -n "${PYTORCH3D_WHEEL:-}" ]; then
     $PIP install fvcore iopath
     $PIP install --no-index --no-cache-dir pytorch3d -f "$PYTORCH3D_WHEEL"
@@ -75,13 +80,13 @@ else
     $PIP install -e src/libs/pytorch3d --no-build-isolation
 fi
 
-# --- 5. nvdiffrast (SuGaR texture export + GW mesh rasterisation) -------------
-banner "5/8 nvdiffrast"
+# --- 6. nvdiffrast (SuGaR texture export + GW mesh rasterisation) -------------
+banner "6/9 nvdiffrast"
 $PIP install git+https://github.com/NVlabs/nvdiffrast.git --no-build-isolation || \
     echo "WARN: nvdiffrast install failed (texture export will fall back)."
 
-# --- 6. Per-backend CUDA rasterizers (compiled at sm_$GPU_ARCH) ---------------
-banner "6/8 Backend CUDA rasterizers"
+# --- 7. Per-backend CUDA rasterizers (compiled at sm_$GPU_ARCH) ---------------
+banner "7/9 Backend CUDA rasterizers"
 # Clean any stale build/ first: leftover object files from an earlier build
 # (e.g. a different GPU arch) are reused and silently ignore TORCH_CUDA_ARCH_LIST.
 # NOTE: do not run two setups against the SAME checkout concurrently — they race
@@ -112,12 +117,12 @@ case " $BACKENDS " in *" gw "*)
     ;;
 esac
 
-# --- 7. Gaussian Wrapping: CGAL / tetra_triangulation (fragile, optional) -----
+# --- 8. Gaussian Wrapping: CGAL / tetra_triangulation (fragile, optional) -----
 case " $BACKENDS " in *" gw "*)
     if [ "$SKIP_TETRA" = "1" ]; then
         echo "Skipping tetra_triangulation (SKIP_TETRA=1)."
     else
-        banner "7/8 tetra_triangulation (CGAL)"
+        banner "8/9 tetra_triangulation (CGAL)"
         CONDA="${CONDA_EXE:-conda}"
         if have "$CONDA"; then
             "$CONDA" install -y cmake || true
@@ -138,8 +143,8 @@ case " $BACKENDS " in *" gw "*)
     ;;
 esac
 
-# --- 8. The augenblick package itself (the `augenblick` console script) -------
-banner "8/8 augenblick (editable)"
+# --- 9. The augenblick package itself (the `augenblick` console script) -------
+banner "9/9 augenblick (editable)"
 $PIP install -e . --no-deps --no-build-isolation
 
 # --- Verify -------------------------------------------------------------------
