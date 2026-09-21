@@ -1,11 +1,11 @@
 #!/bin/bash
-# COLMAP -> visual-hull initialisation for every scene under DATA_ROOT, one array task per scene.
-# Hull refines an existing COLMAP scene, so the input SfM is run first if it is absent.
+# Visual-hull initialisation, one array task per scene. It refines an existing COLMAP
+# scene, so the input SfM runs first when absent. Requires masks.
 # Usage: sbatch hpg_slurm/hull_sfm.sbatch [extra hull flags]
-# Single scene: sbatch --array=N hpg_slurm/hull_sfm.sbatch   (N = index in the sorted scene list)
-# SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
-# Output differs from the input only in sparse/0/points3D.ply, so feeding both to recon.sbatch
-# gives an initialisation ablation with poses, intrinsics and training schedule held fixed.
+# One scene: sbatch --array=N ...   (N indexes the sorted scene list)
+# SFM= picks the input: <scene>/<SFM>/ (default colmap).
+# Output differs from the input only in sparse/0/points3D.ply, so feeding both to
+# recon.sbatch ablates initialisation with poses, intrinsics and schedule held fixed.
 #SBATCH --job-name=hull-sfm
 #SBATCH --account=arthur.porto
 #SBATCH --partition=hpg-rtx6000
@@ -15,16 +15,16 @@
 #SBATCH --gpus=1
 #SBATCH --mem=48gb
 #SBATCH --time=2:00:00
-#SBATCH --array=0-5
+#SBATCH --array=0-75
 #SBATCH --output=hpg_slurm/logs/%x-%A_%a.out
 #SBATCH --error=hpg_slurm/logs/%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
+# Own set -e: common.sh's is moot if the source itself fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
+# Slurm runs this from /var/spool, so $0 cannot find the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/hpg_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -38,28 +38,13 @@ case "$SFM" in
     *) echo "ERROR: unknown SFM='$SFM' (valid: colmap, vggt, vggt_ba)" >&2; exit 2 ;;
 esac
 
+discover_scenes
+select_scene
+PREPARED="$SCENE"
+SFM_OUT="$RESULT_ROOT/$SCENE_NAME/$SFM"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-hull"
 
-# Sorted so an array index maps to the same scene across submissions.
-mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
-    -printf '%h\n' | xargs -r -n1 basename | sort)
-
-if [ "${#SCENES[@]}" -eq 0 ]; then
-    echo "ERROR: no <scene>/prepared dirs under $DATA_ROOT" >&2
-    exit 2
-fi
-
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [ "$IDX" -ge "${#SCENES[@]}" ]; then
-    echo "ERROR: array index $IDX exceeds ${#SCENES[@]} scene(s): ${SCENES[*]}" >&2
-    exit 2
-fi
-
-SCENE_NAME="${SCENES[$IDX]}"
-PREPARED="$DATA_ROOT/$SCENE_NAME/prepared"
-SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
-OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-hull"
-
-echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]})"
+echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"
 echo "output     : $OUT"
 
