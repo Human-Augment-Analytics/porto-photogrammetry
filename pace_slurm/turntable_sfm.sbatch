@@ -1,8 +1,6 @@
 #!/bin/bash
 # COLMAP -> turntable rig refinement for every scene under DATA_ROOT, one array task per scene.
 # Turntable refines an existing COLMAP scene, so the input SfM is run first if it is absent.
-# Usage: sbatch pace_slurm/turntable_sfm.sbatch [extra turntable flags]
-# Single scene: sbatch --array=N pace_slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
 # SFM selects which SfM result is refined: results/<scene>/<SFM>/ (default colmap).
 #SBATCH --job-name=turntable-sfm
 #SBATCH --partition=ice-gpu
@@ -18,10 +16,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/pace_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -34,7 +30,6 @@ case "$SFM" in
     colmap|vggt|vggt_ba) ;;
     *) echo "ERROR: unknown SFM='$SFM' (valid: colmap, vggt, vggt_ba)" >&2; exit 2 ;;
 esac
-
 
 discover_scenes
 select_scene

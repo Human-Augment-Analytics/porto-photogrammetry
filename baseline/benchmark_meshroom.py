@@ -14,6 +14,7 @@ Usage:
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -21,6 +22,11 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# The Texturing node's declared outputs (see AliceVision share/meshroom/aliceVision/
+# Texturing.py): the mesh, its material, and the texture atlases. Everything else in
+# MeshroomCache is intermediate.
+TEXTURED_MESH_GLOBS = ("texturedMesh.*", "texture_*")
 
 
 def run(cmd, cwd=None, env=None):
@@ -31,6 +37,58 @@ def run(cmd, cwd=None, env=None):
     if result.returncode != 0:
         logger.error(f"Command failed with return code {result.returncode}")
         sys.exit(result.returncode)
+
+
+def _dir_size(path):
+    """Total bytes under path, ignoring anything that vanishes mid-walk."""
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def prune_cache(output_dir):
+    """Keep the textured mesh, delete the rest of MeshroomCache.
+
+    A 663-image scene leaves ~50 GB in MeshroomCache, almost all of it
+    PrepareDenseScene EXRs and DepthMap tiles, against a 300 GB quota. The mesh
+    itself is a few hundred MB. This moves the Texturing outputs to
+    <output_dir>/textured_mesh/ and removes the cache.
+
+    Only called after meshroom_batch exits 0: on failure the cache is the only way
+    to resume, so a failed run keeps everything.
+    """
+    cache = Path(output_dir) / "MeshroomCache"
+    if not cache.is_dir():
+        logger.warning(f"No MeshroomCache at {cache}; nothing to prune")
+        return
+
+    texturing = cache / "Texturing"
+    # Texturing writes into a per-uid subfolder; there is normally exactly one.
+    mesh_files = []
+    for glob in TEXTURED_MESH_GLOBS:
+        mesh_files.extend(texturing.glob(f"*/{glob}"))
+    mesh_files = [f for f in mesh_files if f.is_file()]
+
+    if not mesh_files:
+        # Refuse to delete a cache we cannot replace the mesh from. This is the
+        # safety net for a pipeline that reported success without a usable mesh.
+        logger.error(f"No textured mesh found under {texturing}; keeping cache intact")
+        return
+
+    dest = Path(output_dir) / "textured_mesh"
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in mesh_files:
+        shutil.copy2(f, dest / f.name)
+    logger.info(f"Kept {len(mesh_files)} mesh file(s) -> {dest}")
+
+    freed = _dir_size(cache)
+    shutil.rmtree(cache)
+    logger.info(f"Pruned MeshroomCache, freed {freed / 2**30:.1f} GiB")
 
 
 def main():
@@ -75,6 +133,12 @@ def main():
     parser.add_argument("--texture_side", type=int, default=8192, help="Texturing.textureSide")
     parser.add_argument("--texturing_downscale", type=int, default=2, help="Texturing.downscale")
     parser.add_argument("--max_threads", type=int, default=16, help="FeatureExtraction:maxThreads")
+    parser.add_argument(
+        "--keep_cache",
+        action="store_true",
+        help="Keep MeshroomCache after a successful run (default: delete it, keeping only "
+             "the textured mesh). The cache is ~50 GB for a 663-image scene.",
+    )
 
     args = parser.parse_args()
     input_dir = args.input_dir.resolve()
@@ -136,8 +200,15 @@ def main():
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(meshroom_root), env.get("PYTHONPATH", "")]))
 
     t0 = time.time()
+    # run() exits non-zero on failure, so reaching the next line means success and
+    # the cache is safe to prune.
     run(cmd, env=env)
     elapsed = time.time() - t0
+
+    if args.keep_cache:
+        logger.info("Keeping MeshroomCache (--keep_cache)")
+    else:
+        prune_cache(output_dir)
 
     logger.info("=" * 60)
     logger.info("Pipeline complete")

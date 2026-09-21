@@ -36,7 +36,7 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [backend-gaussian-wrapping.md](MEMORY/backend-gaussian-wrapping.md) | GW three stages, components, CUDA submodule matrix |
 | [baseline-meshroom.md](MEMORY/baseline-meshroom.md) | Meshroom wrapper + reference runtimes |
 | [repo-conventions.md](MEMORY/repo-conventions.md) | Doc rule, repo layout, legacy code, ID/naming and commit conventions |
-| [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts for HiPerGator + PACE ICE, partitions/accounts, GPU switch, batch-env gotchas |
+| [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts for HiPerGator + PACE ICE, partitions/accounts, GPU switch, timing CSV, batch-env gotchas |
 | [augenblick-package.md](MEMORY/augenblick-package.md) | The `src/augenblick` package: ABCs, registry, config bridge, CLI, adding a backend |
 
 `.claude/PLANS/` holds implementation specs for landed refactors — the reasoning and constraints
@@ -85,6 +85,9 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
   standalone SfM. The `SceneRefiner` base class enforces this.
 - The `augenblick` CLI comes from `pip install -e . --no-deps --no-build-isolation`, and must be
   installed into **each** per-GPU conda env — the SLURM jobs call the bare console script.
+- A new PACE job sources `common.sh` (torch) or `meshroom_common.sh` (AliceVision); both then
+  source `scene_common.sh`, which is what every job shares and no job sources directly. See
+  [cluster-slurm.md](MEMORY/cluster-slurm.md).
 - COLMAP wants masks named `<image_name>.png` (`foo.jpg.png`); the pycolmap scripts build a
   `masks_colmap/` symlink dir to satisfy this.
 - Per-backend quirks (GW's no-`cwd` + passthrough, PGSR's `sparse/0/` flattening, SuGaR's

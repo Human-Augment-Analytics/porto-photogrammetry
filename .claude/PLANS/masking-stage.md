@@ -28,9 +28,9 @@ directory.
 
 ## Why a stage
 
-**9 of 47 neurips scenes ship no masks, all >=432 images.**
-`pace_slurm/vggt_ba_masked_h200.sbatch`'s header records that unmasked BA "failed on 36 of 47
-scenes with 'No reconstruction can be built with BA'". Counted directly:
+**9 of 47 neurips scenes ship no masks, all >=432 images.** Unmasked BA failed on 36 of 47
+scenes with *No reconstruction can be built with BA* — too few surviving correspondences.
+Counted directly:
 
 ```bash
 for d in data/neurips/prepared/*/; do
@@ -638,7 +638,7 @@ Sourcing `pace_slurm/common.sh` runs its `conda activate "$CONDA_ENV"` on the sh
 first; the two extra lines then re-activate `augenblick_masked`. `conda activate` layered
 this way replaces the previous activation cleanly.
 
-`pace_slurm_verify/mask.sbatch`, structured like `pace_slurm/vggt_ba_masked_h200.sbatch`:
+`pace_slurm_verify/mask.sbatch`, structured like the other per-scene array jobs:
 
 - `--job-name=mask`
 - `--gres=gpu:a100:1` — any of a100/a40/l40s; U^2-Net is small.
