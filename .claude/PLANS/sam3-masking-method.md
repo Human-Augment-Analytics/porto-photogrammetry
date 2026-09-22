@@ -4,17 +4,24 @@ Implementation spec. Historical once it lands — where this and the code disagr
 wins; the durable description belongs in
 [pipeline-masking.md](../MEMORY/pipeline-masking.md).
 
-**Status: verified end-to-end (2026-09-20, L40S, job 5871290, 35m10s).** 432/432 masks written,
-0 failed, 690 s (**1.60 s/image**); contract check passed; 432/432 `masks_colmap/` links with no
-unmatched masks; COLMAP logged `Mask: Yes` per image and reconstructed **432/432 images,
-53,612 points, 1 model**. Overlays confirm `skeleton` isolates the specimen. Every "verified"
-claim below was checked against a real run — the gotchas in §2 and §5 each cost a failed job
-first, and both hid behind login-node stub tests that passed.
+**Verified end-to-end twice**, on two clusters and two cards. Every "verified" claim below was
+checked against a real run; the gotchas in §2 and §5 each cost a failed job first, and both hid
+behind login-node stub tests that passed.
 
-**Outstanding:** the tree was pruned further after that run (§1 pass 2). The current tree has a
-clean `compileall`, a dangling-import scan and a passing GPU run on the immediately preceding
-version, but the smoke test has not yet been placed on a card — jobs 5882582 (`ice-bw-gpu`) and
-5881138 (`ice-gpu`) are queued. Documentation (§"Documentation to update") is written.
+| | L40S (PACE, job 5871290, 2026-09-20) | RTX PRO 6000 Blackwell (HPG, job 42866133, 2026-09-21) |
+|---|---|---|
+| Scene | `UF_Herp_87980_cranium` | `UF_Herp_87980_lower_jaw` |
+| Wall | 35m10s | 5m27s, `COMPLETED 0:0` |
+| Masks | 432/432, 0 failed | 432/432, 0 failed |
+| Masking time | 690 s (1.60 s/image) | **289.9 s (0.671 s/image)** |
+| Detections | single, 0.949–0.965 | single, **0.816–0.961** |
+
+The L40S run also passed the contract check, linked 432/432 `masks_colmap/` with no unmatched
+masks, and COLMAP logged `Mask: Yes` per image and reconstructed **432/432 images, 53,612
+points, 1 model**. The HiPerGator run is the first GPU run of the **post-prune** tree from a
+fresh install, which is what confirms the prune (§1 pass 2) broke no function-local import —
+the job the queued smoke test was meant to do. Its two new traps are in §8. Documentation
+(§"Documentation") is written.
 
 ## Goal
 
@@ -47,17 +54,15 @@ Verified against branch `syed/dvlt-inclusion`.
 - Heavy imports are function-local in both existing methods so `mask --list` works on a login
   node. Follow this.
 - Envs are **Python 3.10.21, torch 2.9.1+cu129, numpy 2.2.6** (verified by running
-  `augenblick_rtx_pro_6000/bin/python`). All six envs surveyed identical on py/torch/numpy and
-  all have the `augenblick` CLI installed, except that `augenblick_a40` is on **cu130** where
-  the other five are cu129 — irrelevant to SAM 3, which builds nothing, but it means a40 is not
-  a like-for-like substitute for a `pip freeze` comparison. All six `scripts/setup_*.sh` set
-  `NUMPY_GENERATION=2`.
+  `augenblick_rtx_pro_6000/bin/python`). All six envs are identical on py/torch/numpy and have
+  the `augenblick` CLI, except `augenblick_a40` on **cu130** — irrelevant to SAM 3, which builds
+  nothing, but it means a40 is not a like-for-like `pip freeze` comparison. All six
+  `scripts/setup_*.sh` set `NUMPY_GENERATION=2`.
 - `src/libs/vggt` is **vendored in-tree, not a submodule** (`.gitmodules` has no `vggt` entry).
 - `common.sh` does `module purge` and a batch shell does not source `~/.bashrc`. It now
   **exports `HF_HOME`/`TORCH_HOME` itself**, defaulting to `$HOME/scratch/huggingface/` and
-  `$HOME/scratch/torch/` (the `~/.bashrc:13-14` values), so no job sets them. At the time this
-  plan was written it did not, which is why §6 below originally put the exports in
-  `mask.sbatch`.
+  `$HOME/scratch/torch/` (the `~/.bashrc:13-14` values), so no job sets them. It did not when
+  this plan was written, which is why §6 originally put the exports in `mask.sbatch`.
 - `data/neurips/subset/prepared/` holds 10 scenes, each with `images/` + `masks/`.
 
 ### Verified SAM 3 facts
@@ -69,8 +74,8 @@ From the upstream README and `pyproject.toml` (fetched 2026-09-19):
 | `requires-python` | `>=3.8` | **Python 3.10 is fine.** The README's "3.12 or higher" is advisory, not enforced. Do not create a new env. |
 | torch | README ">=2.7"; unpinned in `pyproject.toml` | 2.9.1 satisfies it. |
 | numpy | `numpy>=1.26,<2` | **Conflicts with the env's numpy 2.2.6.** See below. |
-| Other deps | `timm>=1.0.17`, `tqdm`, `ftfy==6.1.1`, `regex`, `iopath>=0.1.10`, `typing_extensions`, `huggingface_hub` | `timm`, `ftfy`, `regex` are new. **`pycocotools`/`psutil` are not** — they were needed only while `sam3/train/` and the video path were still vendored; the deeper prune in §1 removed both callers, so neither is installed. |
-| Checkpoints | Gated on HF (`facebook/sam3`), needs `hf auth login` | Warm on the login node; compute nodes have no interactive TTY. |
+| Other deps | `timm>=1.0.17`, `tqdm`, `ftfy==6.1.1`, `regex`, `iopath>=0.1.10`, `typing_extensions`, `huggingface_hub` | `timm`, `ftfy`, `regex` are new. **`pycocotools`/`psutil` are not** — they were needed only while `sam3/train/` and the video path were vendored; the §1 prune removed both callers. |
+| Checkpoints | Gated on HF (`facebook/sam3`), needs `hf auth login` | Compute nodes have no interactive TTY. |
 | License | SAM License (not Apache/MIT) | Note in the README entry. |
 
 ## Dependency rule: nothing gets reinstalled or upgraded
@@ -89,10 +94,9 @@ Rules for the install step:
    `psutil` were in this list until the §1 prune removed the modules that imported them.)
 3. `PIP_CONSTRAINT` (already exported by `setup_common.sh`) stays in force as a second guard.
 4. Record `pip freeze` before and after; **any line that changes other than the additions
-   is a bug in this step**, not an acceptable side effect. Verified outcome at the time: 6 lines
-   added (`sam3`, `timm`, `ftfy`, `regex`, `pycocotools`, `psutil`), 0 removed, 0 changed; the
-   final tree drops the last two, leaving 4. Note `ftfy` lands at 6.3.1 rather than upstream's
-   `==6.1.1`, since `--no-deps` bypasses that pin.
+   is a bug in this step**, not an acceptable side effect. Measured: 4 lines added, 0 removed,
+   0 changed. `ftfy` lands at 6.3.1 rather than upstream's `==6.1.1`, since `--no-deps`
+   bypasses that pin.
 
 ## Changes
 
@@ -107,9 +111,8 @@ rm -rf src/libs/sam3/.git
 git add src/libs/sam3
 ```
 
-Then prune to the inference subset. This was done in two passes; the **final tree is 31 `.py`
-files / 1.9 MB**, down from upstream's 284 files / 11 MB, and holds only
-`sam3/{model,perflib,sam,assets}`:
+Then prune to the inference subset, in two passes. The **final tree is 31 `.py` files / 1.9 MB**
+(upstream: 284 files / 11 MB) and holds only `sam3/{model,perflib,sam,assets}`:
 
 ```bash
 # pass 1 — the obviously-unused trees (223 files / 9.1 MB -> 136 files / 5.0 MB)
@@ -120,19 +123,18 @@ rm -rf src/libs/sam3/sam3/train src/libs/sam3/sam3/logger.py
 
 `scripts/` alone is 4.3 MB, almost all of it one iNaturalist eval JSON.
 
-The second pass needed the §1b patches first. `sam3/train/` looks load-bearing — `sam3_image.py`
-imports `BatchedDatapoint` from the collator for a type annotation, and `model_builder.py`
-builds a training matcher — but both are reachable only on paths the image-masking method never
-takes, so each was converted to a local patch (see §1b) and the tree removed. Dropping
-`sam3/train/` is what removed the `pycocotools` dependency.
+Pass 2 needed the §1b patches first. `sam3/train/` looks load-bearing — `sam3_image.py` imports
+`BatchedDatapoint` from the collator for a type annotation, and `model_builder.py` builds a
+training matcher — but both are reachable only on paths the image-masking method never takes, so
+each became a local patch and the tree was removed. Dropping `sam3/train/` is what removed the
+`pycocotools` dependency.
 
 **Keep `sam3/assets/`** — it holds the BPE vocab the model builder loads. **Keep
 `sam3/perflib/fa3.py`**: static analysis says nothing imports it, but it is imported lazily on
 Hopper cards and deleting it breaks H100/H200.
 
-There are no `notebooks/` or `training/` directories in the upstream tree; the top-level
-`assets/` (55 MB of docs media, distinct from `sam3/assets/`) and `examples/` are dropped at
-clone time.
+Upstream has no `notebooks/` or `training/` directories; the top-level `assets/` (55 MB of docs
+media, distinct from `sam3/assets/`) and `examples/` are dropped at clone time.
 
 Because a deleted module can break an import that only fires inside a function body — which
 neither `grep` nor `compileall` catches — every prune pass is followed by a GPU smoke test:
@@ -147,12 +149,12 @@ submodule is what makes these edits maintainable. There are four:
 
 | File | Patch |
 |---|---|
-| `sam3/model_builder.py:8` | `pkg_resources` shim. setuptools removed it in 81 and these envs ship 83, so the upstream import raises `ModuleNotFoundError` at model-build time. Downgrading setuptools would violate the no-reinstall rule, so the single API used (`resource_filename`, which only locates `sam3/assets/bpe_simple_vocab_16e6.txt.gz`) is shimmed onto stdlib `importlib.resources`. |
+| `sam3/model_builder.py:8` | `pkg_resources` shim. setuptools removed it in 81 and these envs ship 83+, so the upstream import raises `ModuleNotFoundError` at model-build time. Downgrading setuptools would violate the no-reinstall rule, so the single API used (`resource_filename`, which only locates `sam3/assets/bpe_simple_vocab_16e6.txt.gz`) is shimmed onto stdlib `importlib.resources`. |
 | `sam3/model_builder.py:471` | The tracker/video/multiplex builders raise `NotImplementedError` instead of importing modules the prune removed. |
 | `sam3/model_builder.py:~329` | The `eval_mode=False` branch raises `NotImplementedError` rather than constructing a training matcher from `sam3.train.matcher`. Inference always passes `eval_mode=True`. |
 | `sam3/model/sam3_image.py:14` | `BatchedDatapoint` is taken from `sam3.model.data_misc` instead of the collator in `sam3/train/`. |
 
-`README.md` inside the vendored tree also carries the marker, noting that the copy is trimmed.
+`README.md` inside the vendored tree also carries the marker, noting the copy is trimmed.
 
 ### 2. `src/augenblick/masking/sam3.py`
 
@@ -275,22 +277,23 @@ rasterizer builds; SAM 3 has no compiled extension.
 
 ### 5. Checkpoint access
 
-`facebook/sam3` is gated. Once, on the **login node**:
+`facebook/sam3` is gated. Authenticate once, on the **login node** — this writes the token to
+`$HF_HOME`, which compute nodes then read:
 
 ```bash
 hf auth login   # token from an account with access granted
-hf download facebook/sam3 sam3.pt   # ~2 GB into $HF_HOME
 ```
 
-This populates `$HF_HOME`, which compute nodes then read. Document both lines in the README — a
-gated 401 on a compute node is otherwise opaque.
+Document that in the README — a gated 401 on a compute node is otherwise opaque. The download
+itself does **not** belong here: this plan originally paired the login with
+`hf download facebook/sam3 sam3.pt`, and the second trap below is why that line is gone.
 
-Two traps here, both hit during verification:
+Two traps, both hit during verification:
 
 - **Do not warm up with `build_sam3_image_model(device='cpu')`.** SAM 3 cannot be built
   CPU-only: `position_encoding.py:55` and `decoder.py:301` hardcode `device="cuda"` when
   precomputing caches, ignoring the `device` argument, so it dies with "Found no NVIDIA
-  driver" on a login node. Use `hf download`, which only needs the network.
+  driver" on a login node.
 - **Do not fetch the checkpoint on the login node at all.** The node's cgroup memory cap killed
   `download_ckpt_from_hf()` three times at the identical byte offset, and `hf download` then
   stalled dead partway. Each attempt left `.incomplete` blobs that `du` still counts toward
@@ -298,9 +301,8 @@ Two traps here, both hit during verification:
   `ls -lL $HF_HOME/hub/models--facebook--sam3/snapshots/*/` (expect `sam3.pt`, ~3.45 GB) and
   delete any `blobs/*.incomplete` before retrying.
 
-  The fix that works: fetch it **from inside the batch job**, where there is no cap and compute
-  nodes have outbound network. It is a no-op once the blob is cached, so it costs nothing on
-  reruns:
+  Fetch it **from inside the batch job** instead, where there is no cap and compute nodes have
+  outbound network. It is a no-op once the blob is cached, so reruns cost nothing:
 
   ```bash
   python - <<'PYDL'
@@ -312,11 +314,11 @@ Two traps here, both hit during verification:
 ### 6. SLURM — `pace_slurm/mask.sbatch`
 
 1. Extend the method guard: `case "$MASK_METHOD" in rembg|threshold|sam3) ;;`
-2. **Export the cache roots.** `common.sh` runs `module purge` and a batch shell does not source
-   `~/.bashrc`, so `HF_HOME`/`TORCH_HOME` are **not** inherited — without them SAM 3 re-downloads
-   its checkpoint into `$HOME/.cache` on every task. This was originally two `export` lines in
-   `mask.sbatch`; they have since moved into `common.sh`, which applies the same defaults for
-   every job, so **`mask.sbatch` no longer sets them**.
+2. **Cache roots need no change here.** `common.sh` runs `module purge` and a batch shell does
+   not source `~/.bashrc`, so `HF_HOME`/`TORCH_HOME` are not inherited — without them SAM 3
+   re-downloads its checkpoint into `$HOME/.cache` on every task. These were two `export` lines
+   in `mask.sbatch` originally; they have since moved into `common.sh`, which applies the same
+   defaults for every job, so **`mask.sbatch` no longer sets them**.
 3. The ORT preflight is already wrapped in `if [ "$MASK_METHOD" = "rembg" ]`, so it skips
    `sam3`. Add the parallel guard:
    ```bash
@@ -330,8 +332,8 @@ Two traps here, both hit during verification:
    ```
 
 Nothing else changes: `OUT_LAYOUT=nested` already writes
-`$RESULT_ROOT/$MASK_METHOD/$SCENE_NAME`, so `sam3` coexists per scene. Extra flags forward via
-the trailing `"$@"`.
+`$RESULT_ROOT/$MASK_METHOD/$SCENE_NAME`, so `sam3` coexists per scene, and extra flags forward
+via the trailing `"$@"`.
 
 **Submitting on the RTX Pro 6000 (the verification target).** `mask.sbatch` hardcodes
 `#SBATCH --partition=ice-gpu` and `--gres=gpu:l40s:1`, and the RTX Pro 6000 Blackwell is the
@@ -347,37 +349,33 @@ GPU=rtx_pro_6000 sbatch --partition=ice-bw-gpu \
 ```
 
 On any `ice-gpu` card the plain form still applies, e.g.
-`MASK_METHOD=sam3 sbatch --job-name=mask-sam3 pace_slurm/mask.sbatch`.
-
-The timing CSV's `method` column is the **Slurm job name**, so a distinct `--job-name` is what
-keeps the three methods separable in one CSV.
+`MASK_METHOD=sam3 sbatch --job-name=mask-sam3 pace_slurm/mask.sbatch`. The timing CSV's
+`method` column is the **Slurm job name**, so a distinct `--job-name` is what keeps the three
+methods separable in one CSV.
 
 **Resources — measured, not estimated.** On an L40S, 432 images at 6240x4160 took **690 s
-(1.60 s/image)** with `--cpus-per-task=4 --mem=32gb`: *faster* than `rembg`'s ~2.2 s, so no
-walltime increase is needed for the mask stage. SAM 3 runs one image at a time at 1008², so
-VRAM is roughly constant in scene size; it did not come close to OOM on an L40S. If it does
-OOM on some other card, that is a finding: record it and stop, do not retune.
+(1.60 s/image)** with `--cpus-per-task=4 --mem=32gb`: *faster* than `rembg`'s ~2.2 s, so the
+mask stage needs no walltime increase. SAM 3 runs one image at a time at 1008², so VRAM is
+roughly constant in scene size; it did not come close to OOM on an L40S. If it does OOM on some
+other card, that is a finding: record it and stop, do not retune.
 
 **COLMAP, not masking, is the long pole.** Exhaustive matching over 432 images dominates the
 job; size `--time` for that, not for the mask stage.
 
 ### 7. Verification
 
-**Environment: `augenblick_l40s`** (`GPU=l40s`, partition `ice-gpu`, `--gres=gpu:l40s:1` —
-all three are `mask.sbatch`'s own defaults, so no overrides). Python 3.10.21 / torch
-2.9.1+cu129 / numpy 2.2.6, matching what step (b) asserts.
-
-`augenblick_rtx_pro_6000` works identically but **`ice-bw-gpu` is only 4 nodes and was
-unschedulable for 9+ hours** during this work, against ~1 minute to place on `ice-gpu`. Prefer
-L40S for verification. Note each env needs its own `--no-deps` install of the six packages;
-installing into one does not reach the others.
+**Environment: `augenblick_l40s`** (`GPU=l40s`, partition `ice-gpu`, `--gres=gpu:l40s:1` — all
+three are `mask.sbatch`'s own defaults, so no overrides). Python 3.10.21 / torch 2.9.1+cu129 /
+numpy 2.2.6, matching what step (b) asserts. `augenblick_rtx_pro_6000` works identically but
+**`ice-bw-gpu` is only 4 nodes and was unschedulable for 9+ hours** during this work, against
+~1 minute to place on `ice-gpu`. Each env needs its own `--no-deps` install; installing into one
+does not reach the others.
 
 Steps (a) and (b) are import-level and run on the **login node**, which is also where §5's
-`hf auth login` warm-up must happen. Only (c) and the closing COLMAP run need the card.
+`hf auth login` happens. Only (c) and the closing COLMAP run need the card.
 
-Pick one scene from `data/neurips/subset/prepared/` (10 available, each with `images/` +
-`masks/`; `UF_Herp_87980_cranium` works). Every output **and every log** lands under
-`output/neurips_verify/sam3/<scene>/`.
+Pick one scene from `data/neurips/subset/prepared/` (10 available; `UF_Herp_87980_cranium`
+works). Every output **and every log** lands under `output/neurips_verify/sam3/<scene>/`.
 
 ```bash
 conda activate "$HOME/scratch/conda/augenblick_rtx_pro_6000"
@@ -424,16 +422,15 @@ Capture `pip_freeze_before.txt` into the same directory *before* step 4 runs.
 
 Then the check that actually matters: **open a few masks next to their images.** Dims and value
 checks pass just as happily for a confidently wrong concept — if `skeleton` latches onto the
-turntable or a scale bar, only looking catches it.
+turntable or a scale bar, only looking catches it. **Do not rely on the scene's shipped
+`masks/` as a reference:** on `UF_Herp_87980_cranium` that directory exists but is **empty**, so
+there is no IoU baseline. Render overlays instead — tint the background and check the silhouette
+by eye. A mask bounding box spanning most of the frame is the tell for a wrong latch; a compact
+box that moves between views is the specimen.
 
-**Do not rely on the scene's shipped `masks/` as a reference:** on `UF_Herp_87980_cranium` that
-directory exists but is **empty**, so there is no IoU baseline. Render overlays instead — tint
-the background and check the silhouette by eye. A mask bounding box spanning most of the frame
-is the tell for a wrong latch; a compact box that moves between views is the specimen.
-
-After any further prune of `src/libs/sam3`, re-run the GPU smoke test rather than repeating the
-full sequence — it is the cheapest thing that catches a function-local import broken by a
-deleted module:
+After any further prune of `src/libs/sam3`, re-run the GPU smoke test rather than the full
+sequence — it is the cheapest thing that catches a function-local import broken by a deleted
+module:
 
 ```bash
 sbatch pace_slurm/sam3_smoke.sbatch          # ~30 s of work, 5-minute wall clock
@@ -445,7 +442,7 @@ has reproduced. The Blackwell env needs the override pair:
 Only `augenblick_l40s` and `augenblick_rtx_pro_6000` have `sam3` installed, so the GPU cannot be
 left to the scheduler's choice: `common.sh` derives the conda env from `GPU`.
 
-Finally, confirm a consumer accepts them — **COLMAP**:
+Finally, confirm a consumer accepts the masks — **COLMAP**:
 
 ```bash
 augenblick sfm colmap --scene "$OUT" --output "$OUT/sfm" 2>&1 | tee "$OUT/sfm_colmap.log"
@@ -466,7 +463,32 @@ Two things to know about this check, both verified in
 Verify the run produced `$OUT/sfm/sparse/0/` and that the registered-image count in the log is
 close to the input image count.
 
-## Documentation — written
+### 8. Second verification — HiPerGator, RTX PRO 6000 Blackwell
+
+Job 42866133 (numbers in the table at the top). Scene `UF_Herp_87980_lower_jaw` from
+`/blue/arthur.porto/data/datasets/photogrammetry/neurips/subset/prepared/`, output under
+`/blue/arthur.porto/srizvi63.gatech/results/neurips_verify/<scene>/`, prompt `skeleton`
+(default), driven by `hpg_slurm/sam3_verify.sbatch`. What it adds over the L40S run: a second
+cluster, a second card, and the first GPU run of the post-prune tree from a clean install.
+
+- **The prune is safe on a card.** A full 432-image run exercises every function-local import
+  the deleted modules could have broken; nothing raised.
+- **`--no-deps` holds on a conda-numpy env.** The `pip freeze` diff was exactly 4 additions
+  (`sam3`, `timm==1.0.29`, `ftfy==6.3.1`, `regex==2026.9.10`), **0 removed, 0 changed**; numpy
+  stayed 2.2.6 and `torch.from_numpy` works. This env's numpy is **conda**-installed, not pip,
+  so a resolver downgrade would have been messier than §"Dependency rule" anticipates.
+- **The `pkg_resources` shim (§1b) is load-bearing here.** This env ships **setuptools 84.0.0**;
+  unpatched upstream would raise `ModuleNotFoundError` at model-build time.
+- **Contract holds:** mode `L`, values `{0,255}`, dims equal to source (4160x6240). Foreground
+  ~0.051, matching the smoke test's 0.0518/0.0516.
+- **`skeleton` is correct on a `Scale_` view.** The `Scale_IMG_0001` overlay shows the scale bar
+  **dimmed** (excluded) with the specimen bright and the fenestrae showing through as background
+  rather than over-filled. This is the check §7 says only looking can make, and it exercises the
+  case the cranium run could not: a frame with a competing bright object.
+
+## Documentation
+
+Written:
 
 - **[pipeline-masking.md](../MEMORY/pipeline-masking.md)** — the `sam3` method bullet with its
   flags, the union-not-argmax rationale, a `### sam3 traps` subsection (bfloat16 autocast; the
@@ -487,15 +509,28 @@ Still to do: **[pace_slurm/README.md](../../pace_slurm/README.md)** — `sam3` i
 `rtx_pro_6000_blackwell` override pair. And add this file to the landed-plans list in
 [repo-conventions.md](../MEMORY/repo-conventions.md) in the same commit as the feature.
 
+`hpg_slurm/README.md` already documents `sam3` (the `MASK_METHOD` list, the CPU-refusal note,
+the `--prompt` default and the gated repo), so the HiPerGator side needs no doc change.
+`hpg_slurm/sam3_verify.sbatch` (§8) is currently **untracked** — a one-off verification driver,
+not part of the pipeline; commit it only if that check is meant to be repeatable, and fix its
+`tee` bug first.
+
 ## Open questions
 
-- **Is `skeleton` right across all 47 scenes?** **Answered for `UF_Herp_87980_cranium`: yes.**
-  All 432 views gave a single detection at 0.949-0.965, and overlays show a clean crocodilian
-  cranium — teeth resolved, fenestrae correctly background, both scale bars excluded. Because
-  detections were single-instance throughout, the union-vs-argmax reduction was never exercised
-  here; a specimen that fragments across detections still needs checking. Untested on soft
-  tissue. Resolve per material by looking, not by reasoning; if it turns out scene-dependent,
-  the honest fix is a per-scene prompt in the SLURM job, not a cleverer default.
+- **Is `skeleton` right across all 47 scenes?** **Answered yes for two scenes**, both
+  UF_Herp_87980. On `_cranium`, all 432 views gave a single detection at 0.949-0.965, overlays
+  showing a clean crocodilian cranium — teeth resolved, fenestrae correctly background, both
+  scale bars excluded. On `_lower_jaw` (§8), again a single detection on all 432 views over a
+  wider 0.816-0.961 band, with the scale bar again excluded. Same specimen and same material,
+  so this is two data points on bone, not two materials. Because detections were single-instance
+  in **both** runs, the union-vs-argmax reduction is still **never exercised**; a specimen that
+  fragments across detections remains unchecked. Untested on soft tissue and on the 9 mammal
+  scenes in the subset. Resolve per material by looking, not by reasoning; if it turns out
+  scene-dependent, the honest fix is a per-scene prompt in the SLURM job, not a cleverer default.
+- **Does the score band matter?** `_lower_jaw` dipped to 0.816 mid-run and recovered, with no
+  rejection and no visible quality loss, so the band is view-dependent variation rather than a
+  failure signal. Worth revisiting only if a scene sits near `score_threshold` (0.5), which
+  neither run approached.
 - **Fall back to `rembg` on a low-score scene?** Deliberately not planned — it would make the
   timing CSV's `method` column lie about what produced a mask. Prefer a visible failure and a
   rerun with a different `--prompt`.
