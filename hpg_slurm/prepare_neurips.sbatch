@@ -1,7 +1,7 @@
 #!/bin/bash
-# Flatten every raw NeurIPS object into a COLMAP-ready <scene>/images + <scene>/masks pair.
+# Flattens each raw NeurIPS object into a COLMAP-ready <scene>/{images,masks} pair.
 # Usage: sbatch hpg_slurm/prepare_neurips.sbatch [extra prepare_uf_dataset.py flags]
-# Single object: sbatch --array=N hpg_slurm/prepare_neurips.sbatch  (N = index in the sorted object list)
+# One object: sbatch --array=N ...   (N indexes the sorted object list)
 # CPU-only: symlinking touches no GPU, so this asks for none.
 #SBATCH --job-name=prepare-neurips
 #SBATCH --account=arthur.porto
@@ -17,10 +17,10 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
+# Own set -e: common.sh's is moot if the source itself fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
+# Slurm runs this from /var/spool, so $0 cannot find the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/hpg_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -59,8 +59,8 @@ echo "object     : $OBJECT ($((IDX + 1)) of ${#OBJECTS[@]})"
 echo "source     : $SRC"
 echo "output     : $OUT"
 
-# Symlinks point at the raw tree, so a stale run leaves dangling links behind a
-# re-flatten; clear the scene first to keep images/ and masks/ consistent.
+# Symlinks point at the raw tree, so a re-flatten would leave dangling links behind;
+# clear the scene first to keep images/ and masks/ consistent.
 rm -rf "$OUT"
 mkdir -p "$OUT"
 

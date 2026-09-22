@@ -38,8 +38,9 @@ class MaskCommonConfig:
         "help": "Reject a mask below this foreground fraction (counts as num_failed)"})
     max_foreground: float = field(default=0.95, metadata={
         "help": "Reject a mask above this foreground fraction"})
-    keep_largest: bool = field(default=True, metadata={
-        "help": "Keep only the largest connected foreground component"})
+    keep_largest: bool = field(default=False, metadata={
+        "help": "Keep only the largest connected foreground component; off by default "
+                "so detached foreground (scale bars, separated parts) survives"})
     fill_holes: bool = field(default=True, metadata={
         "help": "Fill enclosed background holes inside the silhouette"})
 

@@ -1,9 +1,9 @@
 #!/bin/bash
-# COLMAP -> turntable rig refinement for every scene under DATA_ROOT, one array task per scene.
-# Turntable refines an existing COLMAP scene, so the input SfM is run first if it is absent.
+# Turntable rig refinement, one array task per scene. It refines an existing COLMAP
+# scene, so the input SfM runs first when absent.
 # Usage: sbatch hpg_slurm/turntable_sfm.sbatch [extra turntable flags]
-# Single scene: sbatch --array=N hpg_slurm/turntable_sfm.sbatch   (N = index in the sorted scene list)
-# SFM selects which SfM result is refined: results/<scene>/all/<SFM>/ (default colmap).
+# One scene: sbatch --array=N ...   (N indexes the sorted scene list)
+# SFM= picks the input: <scene>/<SFM>/ (default colmap).
 #SBATCH --job-name=turntable-sfm
 #SBATCH --account=arthur.porto
 #SBATCH --partition=hpg-rtx6000
@@ -13,16 +13,16 @@
 #SBATCH --gpus=1
 #SBATCH --mem=24gb
 #SBATCH --time=2:00:00
-#SBATCH --array=0-5
+#SBATCH --array=0-75
 #SBATCH --output=hpg_slurm/logs/%x-%A_%a.out
 #SBATCH --error=hpg_slurm/logs/%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
+# Own set -e: common.sh's is moot if the source itself fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
+# Slurm runs this from /var/spool, so $0 cannot find the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/hpg_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -36,30 +36,13 @@ case "$SFM" in
     *) echo "ERROR: unknown SFM='$SFM' (valid: colmap, vggt, vggt_ba)" >&2; exit 2 ;;
 esac
 
-DATA_ROOT="${DATA_ROOT:-/blue/arthur.porto/data/datasets/photogrammetry/main}"
-RESULT_ROOT="${RESULT_ROOT:-/blue/arthur.porto/srizvi63.gatech/results}"
+discover_scenes
+select_scene
+PREPARED="$SCENE"
+SFM_OUT="$RESULT_ROOT/$SCENE_NAME/$SFM"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-turntable"
 
-# Sorted so an array index maps to the same scene across submissions.
-mapfile -t SCENES < <(find "$DATA_ROOT" -mindepth 2 -maxdepth 2 -type d -name prepared \
-    -printf '%h\n' | xargs -r -n1 basename | sort)
-
-if [ "${#SCENES[@]}" -eq 0 ]; then
-    echo "ERROR: no <scene>/prepared dirs under $DATA_ROOT" >&2
-    exit 2
-fi
-
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [ "$IDX" -ge "${#SCENES[@]}" ]; then
-    echo "ERROR: array index $IDX exceeds ${#SCENES[@]} scene(s): ${SCENES[*]}" >&2
-    exit 2
-fi
-
-SCENE_NAME="${SCENES[$IDX]}"
-PREPARED="$DATA_ROOT/$SCENE_NAME/prepared"
-SFM_OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM"
-OUT="$RESULT_ROOT/$SCENE_NAME/all/$SFM-turntable"
-
-echo "scene      : $SCENE_NAME ($IDX of ${#SCENES[@]})"
+echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"
 echo "input sfm  : $SFM -> $SFM_OUT"
 echo "output     : $OUT"
 

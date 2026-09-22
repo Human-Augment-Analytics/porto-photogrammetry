@@ -6,6 +6,14 @@ A two-stage photogrammetry pipeline for high-fidelity 3D object reconstruction f
 
 Modern photogrammetry pipelines are two-stage: an SfM method first estimates camera parameters and a sparse point cloud, which then initialises a dense surface reconstruction step. This project evaluates how different SfM initialisations interact with Gaussian-primitive-based mesh extraction methods.
 
+**Stage 0 – Masking** (only for scenes that ship no `masks/`):
+
+| Method | Description |
+|--------|-------------|
+| rembg | Learned matting (U²-Net / IS-Net / BiRefNet) via ONNX Runtime |
+| threshold | Classical Otsu / GrabCut, CPU-only |
+| sam3 | SAM 3 concept prompting — a text prompt selects what to segment |
+
 **Stage 1 – Structure-from-Motion:**
 
 | Method | Description |
@@ -127,7 +135,7 @@ make
 pip install -e .
 ```
 
-VGGT model weights (~4 GB) are downloaded automatically from `facebook/VGGT-1B` on HuggingFace on first run.
+VGGT model weights (~4 GB) are downloaded automatically from `facebook/VGGT-1B` on HuggingFace on first run, into `$HF_HOME` if it is set.
 
 ## Project Structure
 
@@ -139,6 +147,7 @@ augenblick/
 ├── src/
 │   ├── augenblick/            # The pipeline package (provides the `augenblick` CLI)
 │   │   ├── core/              #   Scene, config↔argparse bridge, registry, process, timing
+│   │   ├── masking/           #   rembg, threshold, sam3
 │   │   ├── sfm/               #   vggt, colmap, turntable, hull
 │   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw
 │   │   ├── eval/              #   Held-out split, masked PSNR/SSIM/LPIPS scorer
@@ -171,6 +180,7 @@ augenblick/
 │   │   │   ├── scene/              # Scene + GaussianModel + Mesh
 │   │   │   ├── scripts/            # End-to-end driver scripts
 │   │   │   └── submodules/         # CUDA rasterizers + tetra triangulation
+│   │   ├── sam3/              # SAM 3 (vendored, trimmed to the image-masking path)
 │   │   ├── light_glue/        # LightGlue (submodule)
 │   │   └── pytorch3d/         # PyTorch3D (submodule)
 │   └── utils/
@@ -197,6 +207,8 @@ augenblick/
 
 Optional foreground masks can be provided as binary PNG files in a `masks/` directory alongside `images/`. Mask filenames should match image stems (e.g., `image001.png` for `image001.jpg`). White pixels indicate foreground; black pixels indicate background.
 
+If the scene has no masks, generate them with `augenblick mask` (see Step 0.5 below).
+
 ## Usage
 
 All reconstruction backends consume a common COLMAP-format scene directory:
@@ -220,6 +232,33 @@ If your source data has mixed images and masks in a flat directory:
 python pipeline/preparation/prepare_uf_dataset.py /path/to/raw/data \
     --out /path/to/organized/ --mode copy
 ```
+
+### Step 0.5: Masking
+
+Only needed if the scene has no `masks/`. Unlike `sfm`/`recon`, this stage takes `--images`
+(a flat image folder) and *produces* a scene:
+
+```bash
+augenblick mask --list                 # list the available methods
+
+# Learned matting (default). CPU fallback works but is ~4x slower.
+augenblick mask rembg --images /path/to/images/ --output /path/to/scene/
+
+# Classical Otsu / GrabCut. CPU-only, no extra dependency.
+augenblick mask threshold --images /path/to/images/ --output /path/to/scene/ --mode otsu
+
+# SAM 3 concept prompting: a text prompt selects what to segment, so it can
+# exclude things a matting model cannot (e.g. scale bars next to a specimen).
+augenblick mask sam3 --images /path/to/images/ --output /path/to/scene/ \
+    --prompt "skeleton" --score_threshold 0.5
+```
+
+`sam3` is GPU-only and needs the **gated** `facebook/sam3` checkpoint — run `hf auth login`. All detections above `--score_threshold` are unioned into one mask.
+
+Checkpoints are cached under `$HF_HOME`/`$TORCH_HOME`; on PACE, `pace_slurm/common.sh`
+points both at `$HOME/scratch/` so jobs do not fill the capped home directory.
+
+Shared flags: `--only_missing` (resume), `--min_foreground`/`--max_foreground` (reject bounds), `--keep_largest`, `--fill_holes`. A mask failing the bounds is not written, because every consumer reads a missing mask as "skip this view".
 
 ### Step 1: Structure-from-Motion
 
