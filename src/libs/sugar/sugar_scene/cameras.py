@@ -297,33 +297,20 @@ def convert_camera_from_gs_to_pytorch3d(gs_cameras, device='cuda'):
     distortion_params = torch.zeros(N, 6).to(device)
     camera_type = torch.ones(N, 1, dtype=torch.int32).to(device)
 
-    # Pytorch3d-compatible camera matrices
-    # Intrinsics
-    image_size = torch.Tensor(
-        [image_width[0], image_height[0]],
-    )[
-        None
-    ].to(device)
+    # PyTorch3D-compatible camera matrices. Intrinsics must remain per-view:
+    # COLMAP may optimize one camera per image, and physical cameras in the same
+    # capture can have substantially different focal lengths.
+    image_size = torch.stack([image_width, image_height], dim=-1).to(torch.float32)
     scale = image_size.min(dim=1, keepdim=True)[0] / 2.0
     c0 = image_size / 2.0
     p0_pytorch3d = (
-        -(
-            torch.Tensor(
-                (cx[0], cy[0]),
-            )[
-                None
-            ].to(device)
-            - c0
-        )
+        -(torch.stack([cx, cy], dim=-1) - c0)
         / scale
     )
-    focal_pytorch3d = (
-        torch.Tensor([fx[0], fy[0]])[None].to(device) / scale
-    )
+    focal_pytorch3d = torch.stack([fx, fy], dim=-1) / scale
     K = _get_sfm_calibration_matrix(
-        1, "cpu", focal_pytorch3d, p0_pytorch3d, orthographic=False
+        N, device, focal_pytorch3d, p0_pytorch3d, orthographic=False
     )
-    K = K.expand(N, -1, -1)
 
     # Extrinsics
     line = torch.Tensor([[0.0, 0.0, 0.0, 1.0]]).to(device).expand(N, -1, -1)
