@@ -1,6 +1,7 @@
 import sys
 sys.path.append('./gaussian_splatting')
 import os
+import json
 import torch
 import plotly.graph_objs as go
 from gaussian_splatting.scene.gaussian_model import GaussianModel
@@ -138,13 +139,23 @@ class GaussianSplattingWrapper:
             )
         
         if eval_split:
-            self.cam_list = []
-            self.test_cam_list = []
-            for i, cam in enumerate(cam_list):
-                if i % eval_split_interval == 0:
-                    self.test_cam_list.append(cam)
-                else:
-                    self.cam_list.append(cam)
+            # augenblick: an explicit split.json, written by augenblick.eval.split, overrides the
+            # llffhold rule so every backend holds out exactly the same views. Mirrors the inline
+            # read in each backend's readColmapSceneInfo (the vendored libs can't import augenblick).
+            split_file = os.path.join(source_path, "split.json")
+            train_list, test_list = None, None
+            if os.path.exists(split_file):
+                with open(split_file) as handle:
+                    meta = json.load(handle)
+                    train_list, test_list = meta["train"], meta["test"]
+                    print(f"split.json: {len(train_list)} train, {len(test_list)} test")
+
+            if train_list is not None:
+                self.cam_list = [cam for cam in cam_list if cam.image_name in train_list]
+                self.test_cam_list = [cam for cam in cam_list if cam.image_name in test_list]
+            else:
+                self.cam_list = [cam for i, cam in enumerate(cam_list) if i % eval_split_interval != 0]
+                self.test_cam_list = [cam for i, cam in enumerate(cam_list) if i % eval_split_interval == 0]
             # test_ns_cameras = convert_camera_from_gs_to_nerfstudio(self.test_cam_list)
             # self.test_cameras = NeRFCameras.from_ns_cameras(test_ns_cameras)
             self.test_cameras = CamerasWrapper(self.test_cam_list)
