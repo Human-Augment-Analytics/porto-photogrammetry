@@ -221,6 +221,38 @@ python pipeline/preparation/prepare_uf_dataset.py /path/to/raw/data \
     --out /path/to/organized/ --mode copy
 ```
 
+### Step 0.5: Colour Calibration
+
+When a specimen has one 24-patch chart image per camera, define each reference image in a JSON
+file. Set `corners` to `"auto"` to detect the dark-framed chart with a 24-patch confidence gate,
+or provide reviewed corners ordered top-left, top-right, bottom-right, bottom-left as a fallback;
+see `examples/color/uf_herp_3998.json`.
+
+```bash
+augenblick color \
+    --input /path/to/UF_Herp_3998/images \
+    --output /path/to/UF_Herp_3998/calibrated \
+    --config examples/color/uf_herp_3998.json
+```
+
+The command fits one 3×3 linear-RGB transform per camera, excludes chart reference frames,
+copies masks unchanged, and writes `color_calibration_report.json` with patch ΔE, clipping,
+detected patch centres, and matrix coefficients. The output directory must be outside the input
+tree. A redistributable synthetic demonstration is available in `examples/color/demo/`.
+
+Clipping is reported both over the whole image and over foreground pixels from sibling
+`<image-stem>.mask.png` or `<image-name>.mask.png` files. The default mask-only review warning triggers above 1% clipped
+foreground pixels or when calibration increases foreground clipping by more than 0.5 percentage
+points. These are conservative operational review thresholds, not universal biological-quality
+limits; override them with `mask_clipping_warning_percent` and
+`mask_clipping_max_increase_percent` when a study establishes different tolerances.
+
+By default, calibration is relative to `reference_camera`. Absolute calibration is enabled only
+when the configuration supplies all 24 normalized sRGB-D65 patch values as
+`target_srgb_d65` and a non-empty provenance label as `target_name`. Values are ordered
+row-major in the same orientation as the rectified chart. Do not use generic ColorChecker
+values unless the physical chart model and value edition have been verified.
+
 ### Step 1: Structure-from-Motion
 
 Choose one SfM method to produce the COLMAP scene:
