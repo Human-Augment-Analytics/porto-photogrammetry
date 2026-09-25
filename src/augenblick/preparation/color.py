@@ -379,9 +379,13 @@ def camera_name(path: Path, pattern: re.Pattern[str]) -> str | None:
 
 
 def _specimen_mask(source: Path, image_shape: tuple[int, int]) -> np.ndarray | None:
-    """Load a sibling `<image-stem>.mask.png` as a foreground boolean mask."""
-    path = source.with_name(f"{source.stem}.mask.png")
-    if not path.is_file():
+    """Load a sibling foreground mask using either supported archive convention."""
+    candidates = (
+        source.with_name(f"{source.stem}.mask.png"),
+        source.with_name(f"{source.stem}{source.suffix.lower()}.mask.png"),
+    )
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
         return None
     mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if mask is None or mask.shape != image_shape:

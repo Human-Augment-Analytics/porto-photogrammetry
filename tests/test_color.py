@@ -189,11 +189,15 @@ def test_output_cannot_be_inside_input(tmp_path):
         calibrate_directory(tmp_path, tmp_path / "output", config)
 
 
-def test_reference_camera_images_are_copied_exactly(tmp_path):
+@pytest.mark.parametrize(
+    "mask_name",
+    ["camera1_capture.mask.png", "camera1_capture.png.mask.png"],
+)
+def test_reference_camera_images_are_copied_exactly(tmp_path, mask_name):
     chart = synthetic_chart()
     reference = tmp_path / "camera1_ref.png"
     capture = tmp_path / "camera1_capture.png"
-    mask_path = tmp_path / "camera1_capture.mask.png"
+    mask_path = tmp_path / mask_name
     cv2.imwrite(str(reference), chart)
     cv2.imwrite(str(capture), np.full_like(chart, 255))
     mask = np.zeros(chart.shape[:2], dtype=np.uint8)

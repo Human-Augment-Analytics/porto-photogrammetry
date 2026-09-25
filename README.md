@@ -241,7 +241,7 @@ detected patch centres, and matrix coefficients. The output directory must be ou
 tree. A redistributable synthetic demonstration is available in `examples/color/demo/`.
 
 Clipping is reported both over the whole image and over foreground pixels from sibling
-`<image-stem>.mask.png` files. The default mask-only review warning triggers above 1% clipped
+`<image-stem>.mask.png` or `<image-name>.mask.png` files. The default mask-only review warning triggers above 1% clipped
 foreground pixels or when calibration increases foreground clipping by more than 0.5 percentage
 points. These are conservative operational review thresholds, not universal biological-quality
 limits; override them with `mask_clipping_warning_percent` and
