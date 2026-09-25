@@ -237,7 +237,7 @@ augenblick color \
 The command fits one 3×3 linear-RGB transform per camera, excludes chart reference frames,
 copies masks unchanged, and writes `color_calibration_report.json` with patch ΔE, clipping,
 detected patch centres, and matrix coefficients. The output directory must be outside the input
-tree.
+tree. A redistributable synthetic demonstration is available in `examples/color/demo/`.
 
 ### Step 1: Structure-from-Motion
 
