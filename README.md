@@ -244,7 +244,25 @@ python pipeline/preparation/prepare_uf_dataset.py /path/to/raw/data \
     --out /path/to/organized/ --mode copy
 ```
 
-### Step 0.5: Masking
+### Step 0.5: Colour Calibration
+
+When a specimen has one 24-patch chart image per camera, define each reference image and its
+chart corners in a JSON file. Corners are ordered top-left, top-right, bottom-right, bottom-left;
+see `examples/color/uf_herp_3998.json`.
+
+```bash
+augenblick color \
+    --input /path/to/UF_Herp_3998/images \
+    --output /path/to/UF_Herp_3998/calibrated \
+    --config examples/color/uf_herp_3998.json
+```
+
+The command fits one 3×3 linear-RGB transform per camera, excludes chart reference frames,
+copies masks unchanged, and writes `color_calibration_report.json` with patch ΔE, clipping,
+detected patch centres, and matrix coefficients. The output directory must be outside the input
+tree.
+
+### Step 0.75: Masking
 
 Only needed if the scene has no `masks/`. Unlike `sfm`/`recon`, this stage takes `--images`
 (a flat image folder) and *produces* a scene:
