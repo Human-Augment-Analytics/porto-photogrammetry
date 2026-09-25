@@ -1,10 +1,72 @@
 import numpy as np
 import torch
+from pathlib import Path
+from PIL import Image
 from sugar_scene.sugar_model import SuGaR
+from sugar_scene.cameras import GSCamera
 from sugar_utils.spherical_harmonics import SH2RGB
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesUV
 from sugar_utils.mesh_rasterization import MeshRasterizer, RasterizationSettings
+
+
+def _find_source_image(source_path, image_name):
+    """Find one source photograph by camera stem, independent of its extension."""
+    images_dir = Path(source_path) / "images"
+    matches = [path for path in images_dir.iterdir() if path.is_file() and path.stem == image_name]
+    if len(matches) != 1:
+        raise FileNotFoundError(
+            f"expected one source image for {image_name!r} under {images_dir}, found {len(matches)}")
+    return matches[0]
+
+
+def _load_photo_camera(source_path, camera, max_image_size, device):
+    """Load one source photograph and clone its camera at the photograph's resolution."""
+    image_path = _find_source_image(source_path, camera.image_name)
+    with Image.open(image_path) as source:
+        source = source.convert("RGB")
+        width, height = source.size
+        if max_image_size > 0 and max(width, height) > max_image_size:
+            scale = max_image_size / max(width, height)
+            width, height = round(width * scale), round(height * scale)
+            source = source.resize((width, height), Image.Resampling.LANCZOS)
+        image = torch.from_numpy(np.asarray(source, dtype=np.float32).copy()).to(device) / 255.0
+
+    foreground = None
+    mask_path = Path(source_path) / "masks" / f"{camera.image_name}.png"
+    if mask_path.is_file():
+        with Image.open(mask_path) as source_mask:
+            source_mask = source_mask.convert("L").resize((width, height), Image.Resampling.NEAREST)
+            foreground = torch.from_numpy((np.asarray(source_mask) > 127).copy()).to(device)
+
+    full_resolution_camera = GSCamera(
+        colmap_id=camera.colmap_id,
+        R=camera.R,
+        T=camera.T,
+        FoVx=camera.FoVx,
+        FoVy=camera.FoVy,
+        image=None,
+        gt_alpha_mask=None,
+        image_name=camera.image_name,
+        uid=camera.uid,
+        image_height=height,
+        image_width=width,
+        data_device=str(device),
+    )
+    return image.view(1, height, width, 3), foreground, full_resolution_camera
+
+
+def _accumulate_samples(face_colors, face_count, texture_img, texture_count,
+                        face_indices, texture_pixels, colors):
+    """Accumulate projected samples, including repeated face and texel indices."""
+    ones = torch.ones((len(face_indices), 1), dtype=colors.dtype, device=colors.device)
+    face_colors.index_add_(0, face_indices, colors)
+    face_count.index_add_(0, face_indices, ones)
+
+    texture_size = texture_img.shape[1]
+    flat_pixels = texture_pixels[:, 1] * texture_size + texture_pixels[:, 0]
+    texture_img.view(-1, 3).index_add_(0, flat_pixels, colors)
+    texture_count.view(-1, 1).index_add_(0, flat_pixels, ones)
 
 
 @torch.no_grad()
