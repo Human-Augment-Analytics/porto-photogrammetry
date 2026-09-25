@@ -1,8 +1,8 @@
 # Colour calibration demo
 
 This self-contained demo exercises `augenblick color` without private museum data. It creates
-three synthetic camera groups with known colour casts, one 24-patch reference image per camera,
-one capture per camera, and unchanged binary masks.
+three synthetic camera groups with known colour casts, one automatically detected 24-patch
+reference image per camera, one capture per camera, and unchanged binary masks.
 
 ## Run
 

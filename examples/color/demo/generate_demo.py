@@ -74,18 +74,18 @@ def main() -> None:
         "ridge": 1e-6,
         "cameras": {},
     }
-    corners = [[0, 0], [WIDTH - 1, 0], [WIDTH - 1, HEIGHT - 1], [0, HEIGHT - 1]]
-
     for name, camera_gains in gains.items():
         reference_name = f"{name}_chart.png"
-        cv2.imwrite(str(input_dir / reference_name), cast(reference, camera_gains))
+        reference_canvas = np.full((600, 800, 3), 235, dtype=np.uint8)
+        reference_canvas[100:500, 100:700] = cast(reference, camera_gains)
+        cv2.imwrite(str(input_dir / reference_name), reference_canvas)
         cv2.imwrite(str(input_dir / f"{name}_capture.png"), cast(specimen, camera_gains))
         mask = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
         cv2.ellipse(mask, (300, 210), (170, 120), -12, 0, 360, 255, -1)
         cv2.imwrite(str(input_dir / f"{name}_capture.mask.png"), mask)
         config["cameras"][name] = {
             "reference_image": reference_name,
-            "corners": corners,
+            "corners": "auto",
         }
 
     config_path = root / "generated" / "config.json"

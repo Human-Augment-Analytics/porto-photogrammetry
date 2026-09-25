@@ -29,7 +29,7 @@ class CameraChart:
     """One camera's chart image and four source-image corners."""
 
     reference_image: Path
-    corners: np.ndarray
+    corners: np.ndarray | None
 
 
 @dataclass(frozen=True)
@@ -72,9 +72,14 @@ def load_config(path: Path) -> CalibrationConfig:
         name = raw_name.lower()
         if name in cameras:
             raise ColorCalibrationError(f"duplicate camera name after normalization: {name}")
-        corners = np.asarray(camera.get("corners", []), dtype=np.float32)
-        if corners.shape != (4, 2):
-            raise ColorCalibrationError(f"{name}: corners must contain four [x, y] points")
+        raw_corners = camera.get("corners", "auto")
+        corners = None
+        if raw_corners != "auto":
+            corners = np.asarray(raw_corners, dtype=np.float32)
+            if corners.shape != (4, 2):
+                raise ColorCalibrationError(
+                    f"{name}: corners must be 'auto' or contain four [x, y] points"
+                )
         reference_image = Path(camera["reference_image"])
         if reference_image.is_absolute() or ".." in reference_image.parts:
             raise ColorCalibrationError(f"{name}: reference_image must stay inside input")
@@ -127,6 +132,74 @@ def rectify_chart(image: np.ndarray, corners: np.ndarray) -> np.ndarray:
     )
     transform = cv2.getPerspectiveTransform(corners.astype(np.float32), destination)
     return cv2.warpPerspective(image, transform, (width, height))
+
+
+def _order_corners(points: np.ndarray) -> np.ndarray:
+    """Order a quadrilateral as top-left, top-right, bottom-right, bottom-left."""
+    points = np.asarray(points, dtype=np.float32)
+    sums = points.sum(axis=1)
+    differences = np.diff(points, axis=1).ravel()
+    return np.asarray(
+        [
+            points[np.argmin(sums)],
+            points[np.argmin(differences)],
+            points[np.argmax(sums)],
+            points[np.argmax(differences)],
+        ],
+        dtype=np.float32,
+    )
+
+
+def detect_chart_corners(image: np.ndarray, max_dimension: int = 2000) -> np.ndarray:
+    """Detect a dark-framed 24-patch chart and return its ordered corners.
+
+    A candidate is accepted only when rectification recovers a consistent 4 by 6
+    patch grid. Configured manual corners remain the fallback when this fails.
+    """
+    if image is None or image.ndim != 3:
+        raise ColorCalibrationError("chart detection requires a BGR image")
+    height, width = image.shape[:2]
+    scale = min(1.0, max_dimension / max(height, width))
+    resized = (
+        image
+        if scale == 1.0
+        else cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    )
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    shortest = min(resized.shape[:2])
+    kernel_size = max(5, round(shortest * 0.02) | 1)
+    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+    image_area = resized.shape[0] * resized.shape[1]
+    candidates = []
+
+    for threshold in (40, 55, 70, 85, 100, 120):
+        mask = (gray < threshold).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if not 0.005 * image_area <= area <= 0.99 * image_area:
+                continue
+            rectangle = cv2.minAreaRect(contour)
+            rect_width, rect_height = rectangle[1]
+            if min(rect_width, rect_height) < 0.05 * shortest:
+                continue
+            aspect = max(rect_width, rect_height) / min(rect_width, rect_height)
+            if not 1.1 <= aspect <= 3.0:
+                continue
+            corners = _order_corners(cv2.boxPoints(rectangle)) / scale
+            try:
+                locate_patch_centers(rectify_chart(image, corners))
+            except ColorCalibrationError:
+                continue
+            score = area / (1.0 + abs(np.log(aspect / 1.5)))
+            candidates.append((score, corners))
+
+    if not candidates:
+        raise ColorCalibrationError(
+            "automatic chart detection failed confidence checks; provide reviewed corners"
+        )
+    return max(candidates, key=lambda candidate: candidate[0])[1]
 
 
 def _cluster_1d(values: np.ndarray, count: int) -> np.ndarray:
@@ -314,22 +387,30 @@ def _write_image(path: Path, image: np.ndarray, source: Path) -> None:
 def _reference_samples(
     input_dir: Path,
     config: CalibrationConfig,
-) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
+) -> tuple[
+    dict[str, np.ndarray],
+    dict[str, np.ndarray],
+    dict[str, np.ndarray],
+    dict[str, np.ndarray],
+]:
     """Load each reference and return images, samples, and detected centers."""
     images = {}
     samples = {}
     centers = {}
+    corners_used = {}
     for name, chart in config.cameras.items():
         path = input_dir / chart.reference_image
         image = cv2.imread(str(path))
         if image is None:
             raise ColorCalibrationError(f"could not read {name} reference image: {path}")
-        rectified = rectify_chart(image, chart.corners)
+        corners = chart.corners if chart.corners is not None else detect_chart_corners(image)
+        rectified = rectify_chart(image, corners)
         patch_centers = locate_patch_centers(rectified)
         images[name] = image
         centers[name] = patch_centers
+        corners_used[name] = corners
         samples[name] = sample_patches(rectified, patch_centers)
-    return images, samples, centers
+    return images, samples, centers, corners_used
 
 
 def calibrate_directory(
@@ -353,7 +434,7 @@ def calibrate_directory(
         raise ColorCalibrationError(f"output directory is not empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    reference_images, samples, centers = _reference_samples(input_dir, config)
+    reference_images, samples, centers, corners_used = _reference_samples(input_dir, config)
     target_samples = (
         config.target_srgb_d65
         if config.target_srgb_d65 is not None
@@ -381,7 +462,7 @@ def calibrate_directory(
 
         preview_dir = output_dir / "calibration_previews"
         preview_dir.mkdir(exist_ok=True)
-        rectified = rectify_chart(reference_images[name], config.cameras[name].corners)
+        rectified = rectify_chart(reference_images[name], corners_used[name])
         cv2.imwrite(str(preview_dir / f"{name}_chart.png"), rectified)
 
     pattern = re.compile(config.camera_regex, re.IGNORECASE)
@@ -458,6 +539,7 @@ def calibrate_directory(
         "patch_centers_rectified": {
             name: value.tolist() for name, value in centers.items()
         },
+        "chart_corners": {name: value.tolist() for name, value in corners_used.items()},
         "processed_images": counts,
         "clipping": clipping,
         "skipped_images": skipped,
