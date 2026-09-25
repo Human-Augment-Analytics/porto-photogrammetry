@@ -2171,6 +2171,13 @@ class SuGaR(nn.Module):
                 raise ValueError("If no NerfModel is provided, you must provide a CamerasWrapper.")
 
         p3d_camera = nerf_cameras.p3d_cameras[camera_indices]
+        gs_camera = nerf_cameras.gs_cameras[camera_indices]
+        image_height = int(gs_camera.image_height)
+        image_width = int(gs_camera.image_width)
+        fov_x = float(gs_camera.FoVx)
+        fov_y = float(gs_camera.FoVy)
+        tanfovx = math.tan(fov_x * 0.5)
+        tanfovy = math.tan(fov_y * 0.5)
 
         if bg_color is None:
             bg_color = torch.Tensor([0.0, 0.0, 0.0]).to(self.device)
@@ -2196,8 +2203,8 @@ class SuGaR(nn.Module):
         proj_transform = getProjectionMatrix(
             p3d_camera.znear.item(), 
             p3d_camera.zfar.item(), 
-            self.fov_x, 
-            self.fov_y).transpose(0, 1).cuda()
+            fov_x,
+            fov_y).transpose(0, 1).cuda()
         # TODO: THE TWO FOLLOWING LINES ARE IMPORTANT! IT'S NOT HERE IN 3DGS CODE! Should make a PR when I have time
         proj_transform[..., 2, 0] = - p3d_camera.K[0, 0, 2]
         proj_transform[..., 2, 1] = - p3d_camera.K[0, 1, 2]
@@ -2211,10 +2218,10 @@ class SuGaR(nn.Module):
             print("ns camera_center", nerf_cameras.camera_to_worlds[camera_indices][..., 3])
 
         raster_settings = GaussianRasterizationSettings(
-            image_height=int(self.image_height),
-            image_width=int(self.image_width),
-            tanfovx=self.tanfovx,
-            tanfovy=self.tanfovy,
+            image_height=image_height,
+            image_width=image_width,
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
             bg=bg_color,
             scale_modifier=1.,
             viewmatrix=world_view_transform,
