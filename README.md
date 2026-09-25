@@ -240,6 +240,13 @@ copies masks unchanged, and writes `color_calibration_report.json` with patch Δ
 detected patch centres, and matrix coefficients. The output directory must be outside the input
 tree. A redistributable synthetic demonstration is available in `examples/color/demo/`.
 
+Clipping is reported both over the whole image and over foreground pixels from sibling
+`<image-stem>.mask.png` files. The default mask-only review warning triggers above 1% clipped
+foreground pixels or when calibration increases foreground clipping by more than 0.5 percentage
+points. These are conservative operational review thresholds, not universal biological-quality
+limits; override them with `mask_clipping_warning_percent` and
+`mask_clipping_max_increase_percent` when a study establishes different tolerances.
+
 By default, calibration is relative to `reference_camera`. Absolute calibration is enabled only
 when the configuration supplies all 24 normalized sRGB-D65 patch values as
 `target_srgb_d65` and a non-empty provenance label as `target_name`. Values are ordered
