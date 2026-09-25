@@ -1,0 +1,19 @@
+{
+  "reference_camera": "camera1",
+  "camera_regex": "camera[0-9]+",
+  "ridge": 1e-6,
+  "cameras": {
+    "camera1": {
+      "reference_image": "camera1_IMG_9401.JPG",
+      "corners": [[2590, 3317], [3463, 3286], [3510, 3817], [2582, 3825]]
+    },
+    "camera2": {
+      "reference_image": "camera2_IMG_8226.JPG",
+      "corners": [[2800, 2489], [3697, 2497], [3752, 3114], [2800, 3122]]
+    },
+    "camera3": {
+      "reference_image": "camera3_IMG_6883.JPG",
+      "corners": [[2777, 2885], [3370, 2808], [3393, 3161], [2792, 3216]]
+    }
+  }
+}
