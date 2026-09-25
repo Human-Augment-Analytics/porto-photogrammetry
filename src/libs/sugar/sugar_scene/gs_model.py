@@ -139,9 +139,6 @@ class GaussianSplattingWrapper:
             )
         
         if eval_split:
-            # augenblick: an explicit split.json, written by augenblick.eval.split, overrides the
-            # llffhold rule so every backend holds out exactly the same views. Mirrors the inline
-            # read in each backend's readColmapSceneInfo (the vendored libs can't import augenblick).
             split_file = os.path.join(source_path, "split.json")
             train_list, test_list = None, None
             if os.path.exists(split_file):

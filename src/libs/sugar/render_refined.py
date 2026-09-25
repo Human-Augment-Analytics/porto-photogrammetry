@@ -15,9 +15,6 @@ sys.path.insert(0, str(SUGAR_DIR / "gaussian_splatting"))
 
 from sugar_scene.gs_model import GaussianSplattingWrapper
 from sugar_scene.sugar_model import load_refined_model
-# SuGaR's own rasterizer drives the texture bake with the GS camera; nvdiffrast.py
-# warns the PyTorch3D-camera path "can be wrong", so the mesh renders must match the
-# splat renders by going through the same GS-camera rasterization.
 from sugar_utils.mesh_rasterization import MeshRasterizer as SugarMeshRasterizer
 
 
@@ -46,7 +43,6 @@ def _render_textured_mesh(rasterizer, mesh, camera_index, background):
         zbuf=fragments.zbuf,
         dists=None,
     )
-    # sample_textures reuses the OBJ's own UV/texture-map convention, so colors match the bake.
     colors = mesh.textures.sample_textures(p3d_fragments)[0, :, :, 0, :3]
     foreground = pix_to_face[0, :, :, 0] >= 0
     fill = torch.tensor(background, device=colors.device, dtype=colors.dtype)
@@ -83,7 +79,6 @@ def render_held_out(scene_path, manifest_path, output_path, gpu, white_backgroun
     if not textured_mesh_path or not os.path.isfile(textured_mesh_path):
         raise FileNotFoundError("SuGaR evaluation requires the final UV-textured OBJ")
     textured_mesh = load_objs_as_meshes([textured_mesh_path], device=nerfmodel.device)
-    # Rasterize the mesh from the held-out GS cameras, exactly as the texture bake does.
     mesh_rasterizer = SugarMeshRasterizer(cameras=nerfmodel.test_cameras)
 
     for camera_index, camera in enumerate(nerfmodel.test_cameras.gs_cameras):
