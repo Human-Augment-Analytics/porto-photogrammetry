@@ -33,6 +33,25 @@ Open `generated/output/color_calibration_report.json` and confirm:
 The demo establishes command behavior, report structure, mask preservation, and measurable
 relative alignment. It is not evidence for absolute chart calibration or reconstruction quality.
 
+## Absolute-reference mode
+
+Once a physical chart and its value edition are verified, add these fields to the configuration:
+
+```json
+{
+  "target_name": "Manufacturer, model, value edition and source",
+  "target_srgb_d65": [
+    [0.0, 0.0, 0.0]
+  ]
+}
+```
+
+`target_srgb_d65` must contain exactly 24 normalized `[R, G, B]` entries in rectified
+row-major order; the single entry above only illustrates the schema and is intentionally not a
+valid target. In absolute mode every camera, including `reference_camera`, is fitted to the
+verified target. The report records `calibration_mode` and `target_name` so results retain their
+reference provenance.
+
 ## Museum-data validation already completed
 
 The private validation used `UF_Herp_3998` and is summarized here without redistributing source

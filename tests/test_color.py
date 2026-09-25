@@ -113,6 +113,34 @@ def test_config_normalizes_camera_names_and_rejects_parent_paths(tmp_path):
         load_config(path)
 
 
+def test_absolute_target_requires_named_24_patch_srgb_values(tmp_path):
+    path = tmp_path / "config.json"
+    data = {
+        "reference_camera": "camera1",
+        "cameras": {
+            "camera1": {
+                "reference_image": "camera1_ref.png",
+                "corners": [[0, 0], [10, 0], [10, 10], [0, 10]],
+            }
+        },
+        "target_srgb_d65": [[0.5, 0.5, 0.5]] * 24,
+    }
+    path.write_text(json.dumps(data))
+    with pytest.raises(ColorCalibrationError, match="target_name"):
+        load_config(path)
+
+    data["target_name"] = "Verified chart values, edition X"
+    path.write_text(json.dumps(data))
+    config = load_config(path)
+    assert config.target_srgb_d65.shape == (24, 3)
+    assert config.target_name == "Verified chart values, edition X"
+
+    data["target_srgb_d65"] = [[1.1, 0.5, 0.5]] * 24
+    path.write_text(json.dumps(data))
+    with pytest.raises(ColorCalibrationError, match="normalized"):
+        load_config(path)
+
+
 def test_output_cannot_be_inside_input(tmp_path):
     config = CalibrationConfig(
         reference_camera="camera1",
@@ -151,6 +179,37 @@ def test_reference_camera_images_are_copied_exactly(tmp_path):
     assert report["processed_images"]["camera1"] == 1
     assert (output / capture.name).read_bytes() == capture.read_bytes()
     assert not (output / reference.name).exists()
+
+
+def test_absolute_target_calibrates_reference_camera(tmp_path):
+    chart = synthetic_chart()
+    reference = tmp_path / "camera1_ref.png"
+    capture = tmp_path / "camera1_capture.png"
+    cv2.imwrite(str(reference), chart)
+    cv2.imwrite(str(capture), chart)
+    centers = locate_patch_centers(chart)
+    measured = sample_patches(chart, centers)
+    target = np.clip(measured * np.array([0.92, 1.03, 1.08]), 0.0, 1.0)
+    config = CalibrationConfig(
+        reference_camera="camera1",
+        camera_regex=r"camera\d+",
+        cameras={
+            "camera1": CameraChart(
+                Path(reference.name),
+                np.float32([[0, 0], [599, 0], [599, 399], [0, 399]]),
+            )
+        },
+        target_srgb_d65=target.astype(np.float32),
+        target_name="Synthetic sRGB-D65 target",
+    )
+
+    output = tmp_path.parent / f"{tmp_path.name}_absolute"
+    report = calibrate_directory(tmp_path, output, config)
+
+    assert report["calibration_mode"] == "absolute_srgb_d65"
+    assert report["target_name"] == "Synthetic sRGB-D65 target"
+    assert report["metrics"]["camera1"]["mean_delta_e76_after"] < report["metrics"]["camera1"]["mean_delta_e76_before"]
+    assert not np.allclose(report["matrices"]["camera1"], np.eye(3))
 
 
 def test_report_values_are_json_serializable():

@@ -34,12 +34,14 @@ class CameraChart:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Relative reference camera and chart information for every camera group."""
+    """Chart information and optional absolute sRGB-D65 patch reference."""
 
     reference_camera: str
     camera_regex: str
     cameras: dict[str, CameraChart]
     ridge: float = 1e-6
+    target_srgb_d65: np.ndarray | None = None
+    target_name: str | None = None
 
 
 def srgb_to_linear(values: np.ndarray) -> np.ndarray:
@@ -88,11 +90,32 @@ def load_config(path: Path) -> CalibrationConfig:
     if ridge < 0:
         raise ColorCalibrationError("ridge must be non-negative")
 
+    target_data = data.get("target_srgb_d65")
+    target_srgb_d65 = None
+    target_name = data.get("target_name")
+    if target_data is not None:
+        target_srgb_d65 = np.asarray(target_data, dtype=np.float32)
+        if target_srgb_d65.shape != (PATCH_ROWS * PATCH_COLUMNS, 3):
+            raise ColorCalibrationError("target_srgb_d65 must contain 24 [R, G, B] patches")
+        if not np.all(np.isfinite(target_srgb_d65)):
+            raise ColorCalibrationError("target_srgb_d65 must contain finite values")
+        if np.any(target_srgb_d65 < 0.0) or np.any(target_srgb_d65 > 1.0):
+            raise ColorCalibrationError("target_srgb_d65 values must be normalized to [0, 1]")
+        if not isinstance(target_name, str) or not target_name.strip():
+            raise ColorCalibrationError(
+                "target_name is required when target_srgb_d65 is provided"
+            )
+        target_name = target_name.strip()
+    elif target_name is not None:
+        raise ColorCalibrationError("target_name requires target_srgb_d65")
+
     return CalibrationConfig(
         reference_camera=reference_camera,
         camera_regex=data.get("camera_regex", r"camera\d+"),
         cameras=cameras,
         ridge=ridge,
+        target_srgb_d65=target_srgb_d65,
+        target_name=target_name,
     )
 
 
@@ -331,18 +354,23 @@ def calibrate_directory(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     reference_images, samples, centers = _reference_samples(input_dir, config)
-    reference_samples = samples[config.reference_camera]
+    target_samples = (
+        config.target_srgb_d65
+        if config.target_srgb_d65 is not None
+        else samples[config.reference_camera]
+    )
+    calibration_mode = "absolute_srgb_d65" if config.target_srgb_d65 is not None else "relative"
     matrices = {}
     metrics = {}
     for name, camera_samples in samples.items():
         matrix = (
             np.eye(3, dtype=np.float32)
-            if name == config.reference_camera
-            else fit_color_matrix(camera_samples, reference_samples, config.ridge)
+            if calibration_mode == "relative" and name == config.reference_camera
+            else fit_color_matrix(camera_samples, target_samples, config.ridge)
         )
         corrected_samples = linear_to_srgb(srgb_to_linear(camera_samples) @ matrix)
-        before = delta_e76(camera_samples, reference_samples)
-        after = delta_e76(np.clip(corrected_samples, 0.0, 1.0), reference_samples)
+        before = delta_e76(camera_samples, target_samples)
+        after = delta_e76(np.clip(corrected_samples, 0.0, 1.0), target_samples)
         matrices[name] = matrix
         metrics[name] = {
             "mean_delta_e76_before": float(before.mean()),
@@ -420,6 +448,8 @@ def calibrate_directory(
         values["percent_after"] = 100.0 * values.pop("after") / pixels if pixels else 0.0
 
     report = {
+        "calibration_mode": calibration_mode,
+        "target_name": config.target_name,
         "reference_camera": config.reference_camera,
         "camera_regex": config.camera_regex,
         "ridge": config.ridge,
