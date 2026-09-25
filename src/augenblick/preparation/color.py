@@ -42,6 +42,8 @@ class CalibrationConfig:
     ridge: float = 1e-6
     target_srgb_d65: np.ndarray | None = None
     target_name: str | None = None
+    mask_clipping_warning_percent: float = 1.0
+    mask_clipping_max_increase_percent: float = 0.5
 
 
 def srgb_to_linear(values: np.ndarray) -> np.ndarray:
@@ -94,6 +96,12 @@ def load_config(path: Path) -> CalibrationConfig:
     ridge = float(data.get("ridge", 1e-6))
     if ridge < 0:
         raise ColorCalibrationError("ridge must be non-negative")
+    mask_clipping_warning_percent = float(data.get("mask_clipping_warning_percent", 1.0))
+    mask_clipping_max_increase_percent = float(
+        data.get("mask_clipping_max_increase_percent", 0.5)
+    )
+    if mask_clipping_warning_percent < 0 or mask_clipping_max_increase_percent < 0:
+        raise ColorCalibrationError("mask clipping thresholds must be non-negative")
 
     target_data = data.get("target_srgb_d65")
     target_srgb_d65 = None
@@ -121,6 +129,8 @@ def load_config(path: Path) -> CalibrationConfig:
         ridge=ridge,
         target_srgb_d65=target_srgb_d65,
         target_name=target_name,
+        mask_clipping_warning_percent=mask_clipping_warning_percent,
+        mask_clipping_max_increase_percent=mask_clipping_max_increase_percent,
     )
 
 
@@ -368,6 +378,17 @@ def camera_name(path: Path, pattern: re.Pattern[str]) -> str | None:
     return match.group(0).lower() if match else None
 
 
+def _specimen_mask(source: Path, image_shape: tuple[int, int]) -> np.ndarray | None:
+    """Load a sibling `<image-stem>.mask.png` as a foreground boolean mask."""
+    path = source.with_name(f"{source.stem}.mask.png")
+    if not path.is_file():
+        return None
+    mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if mask is None or mask.shape != image_shape:
+        raise ColorCalibrationError(f"mask dimensions do not match image: {path}")
+    return mask > 127
+
+
 def _write_image(path: Path, image: np.ndarray, source: Path) -> None:
     """Write corrected pixels while retaining JPEG EXIF metadata."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -476,6 +497,10 @@ def calibrate_directory(
     clipping = {
         name: {"pixels": 0, "before": 0, "after": 0} for name in config.cameras
     }
+    mask_clipping = {
+        name: {"pixels": 0, "before": 0, "after": 0, "images_with_masks": 0}
+        for name in config.cameras
+    }
     skipped = []
 
     for source in sorted(input_dir.rglob("*")):
@@ -521,12 +546,39 @@ def calibrate_directory(
         clipping[name]["after"] += int(
             np.any((corrected == 0) | (corrected == 255), axis=2).sum()
         )
+        specimen_mask = _specimen_mask(source, image.shape[:2])
+        if specimen_mask is not None:
+            mask_clipping[name]["pixels"] += int(specimen_mask.sum())
+            mask_clipping[name]["before"] += int(
+                (np.any((image == 0) | (image == 255), axis=2) & specimen_mask).sum()
+            )
+            mask_clipping[name]["after"] += int(
+                (np.any((corrected == 0) | (corrected == 255), axis=2) & specimen_mask).sum()
+            )
+            mask_clipping[name]["images_with_masks"] += 1
         counts[name] += 1
 
     for values in clipping.values():
         pixels = values.pop("pixels")
         values["percent_before"] = 100.0 * values.pop("before") / pixels if pixels else 0.0
         values["percent_after"] = 100.0 * values.pop("after") / pixels if pixels else 0.0
+
+    for values in mask_clipping.values():
+        pixels = values.pop("pixels")
+        percent_before = 100.0 * values.pop("before") / pixels if pixels else 0.0
+        percent_after = 100.0 * values.pop("after") / pixels if pixels else 0.0
+        increase = percent_after - percent_before
+        values["foreground_pixels"] = pixels
+        values["percent_before"] = percent_before
+        values["percent_after"] = percent_after
+        values["increase_percent"] = increase
+        values["warning"] = (
+            pixels > 0
+            and (
+                percent_after > config.mask_clipping_warning_percent
+                or increase > config.mask_clipping_max_increase_percent
+            )
+        )
 
     report = {
         "calibration_mode": calibration_mode,
@@ -542,6 +594,11 @@ def calibrate_directory(
         "chart_corners": {name: value.tolist() for name, value in corners_used.items()},
         "processed_images": counts,
         "clipping": clipping,
+        "mask_clipping": mask_clipping,
+        "mask_clipping_thresholds": {
+            "warning_percent": config.mask_clipping_warning_percent,
+            "max_increase_percent": config.mask_clipping_max_increase_percent,
+        },
         "skipped_images": skipped,
     }
     report_path = output_dir / "color_calibration_report.json"

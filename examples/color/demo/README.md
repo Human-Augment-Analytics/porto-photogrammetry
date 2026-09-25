@@ -28,6 +28,7 @@ Open `generated/output/color_calibration_report.json` and confirm:
 - camera 1 uses the identity transform;
 - mean patch Delta E76 decreases for cameras 2 and 3;
 - the three masks in `generated/output/` are byte-identical to their inputs; and
+- `mask_clipping` contains one foreground-only measurement per camera with no warnings; and
 - rectified chart previews exist under `generated/output/calibration_previews/`.
 
 The demo establishes command behavior, report structure, mask preservation, and measurable

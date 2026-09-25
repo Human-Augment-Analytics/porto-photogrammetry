@@ -2,6 +2,8 @@
   "reference_camera": "camera1",
   "camera_regex": "camera[0-9]+",
   "ridge": 1e-6,
+  "mask_clipping_warning_percent": 1.0,
+  "mask_clipping_max_increase_percent": 0.5,
   "cameras": {
     "camera1": {
       "reference_image": "camera1_IMG_9401.JPG",

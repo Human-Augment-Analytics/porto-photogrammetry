@@ -193,8 +193,12 @@ def test_reference_camera_images_are_copied_exactly(tmp_path):
     chart = synthetic_chart()
     reference = tmp_path / "camera1_ref.png"
     capture = tmp_path / "camera1_capture.png"
+    mask_path = tmp_path / "camera1_capture.mask.png"
     cv2.imwrite(str(reference), chart)
-    cv2.imwrite(str(capture), chart)
+    cv2.imwrite(str(capture), np.full_like(chart, 255))
+    mask = np.zeros(chart.shape[:2], dtype=np.uint8)
+    mask[:, :300] = 255
+    cv2.imwrite(str(mask_path), mask)
     config = CalibrationConfig(
         reference_camera="camera1",
         camera_regex=r"camera\d+",
@@ -211,7 +215,12 @@ def test_reference_camera_images_are_copied_exactly(tmp_path):
 
     assert report["processed_images"]["camera1"] == 1
     assert (output / capture.name).read_bytes() == capture.read_bytes()
+    assert (output / mask_path.name).read_bytes() == mask_path.read_bytes()
     assert not (output / reference.name).exists()
+    assert report["mask_clipping"]["camera1"]["images_with_masks"] == 1
+    assert report["mask_clipping"]["camera1"]["foreground_pixels"] == 400 * 300
+    assert report["mask_clipping"]["camera1"]["percent_after"] == 100.0
+    assert report["mask_clipping"]["camera1"]["warning"] is True
 
 
 def test_absolute_target_calibrates_reference_camera(tmp_path):
