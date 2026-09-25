@@ -66,7 +66,12 @@ class ColmapSfM(SfMMethod):
         ro.camera_model = self.config.camera_model
         eo = pycolmap.FeatureExtractionOptions()
         eo.max_image_size = self.config.max_image_size
-        eo.num_threads = -1
+        # Not -1. COLMAP reads that as the machine's core count, which ignores the cgroup a
+        # batch scheduler puts the job in: an 8-CPU job on a 192-core node spawns 192 SIFT
+        # extractors, each holding a full-resolution image and its pyramid, and is killed for
+        # running out of memory. It also makes the thread count depend on which node the job
+        # lands on, so wall-clock stops being comparable between runs.
+        eo.num_threads = len(os.sched_getaffinity(0))
 
         t = time.time()
         pycolmap.extract_features(db_path, str(out_dir / "images"),
