@@ -239,6 +239,12 @@ copies masks unchanged, and writes `color_calibration_report.json` with patch Δ
 detected patch centres, and matrix coefficients. The output directory must be outside the input
 tree. A redistributable synthetic demonstration is available in `examples/color/demo/`.
 
+By default, calibration is relative to `reference_camera`. Absolute calibration is enabled only
+when the configuration supplies all 24 normalized sRGB-D65 patch values as
+`target_srgb_d65` and a non-empty provenance label as `target_name`. Values are ordered
+row-major in the same orientation as the rectified chart. Do not use generic ColorChecker
+values unless the physical chart model and value edition have been verified.
+
 ### Step 1: Structure-from-Motion
 
 Choose one SfM method to produce the COLMAP scene:
