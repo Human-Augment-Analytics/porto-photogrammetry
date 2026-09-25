@@ -297,9 +297,6 @@ def convert_camera_from_gs_to_pytorch3d(gs_cameras, device='cuda'):
     distortion_params = torch.zeros(N, 6).to(device)
     camera_type = torch.ones(N, 1, dtype=torch.int32).to(device)
 
-    # PyTorch3D-compatible camera matrices. Intrinsics must remain per-view:
-    # COLMAP may optimize one camera per image, and physical cameras in the same
-    # capture can have substantially different focal lengths.
     image_size = torch.stack([image_width, image_height], dim=-1).to(torch.float32)
     scale = image_size.min(dim=1, keepdim=True)[0] / 2.0
     c0 = image_size / 2.0
