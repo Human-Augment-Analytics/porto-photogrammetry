@@ -223,8 +223,9 @@ python pipeline/preparation/prepare_uf_dataset.py /path/to/raw/data \
 
 ### Step 0.5: Colour Calibration
 
-When a specimen has one 24-patch chart image per camera, define each reference image and its
-chart corners in a JSON file. Corners are ordered top-left, top-right, bottom-right, bottom-left;
+When a specimen has one 24-patch chart image per camera, define each reference image in a JSON
+file. Set `corners` to `"auto"` to detect the dark-framed chart with a 24-patch confidence gate,
+or provide reviewed corners ordered top-left, top-right, bottom-right, bottom-left as a fallback;
 see `examples/color/uf_herp_3998.json`.
 
 ```bash

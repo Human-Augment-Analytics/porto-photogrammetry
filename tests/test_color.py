@@ -13,10 +13,12 @@ from augenblick.preparation.color import (
     ColorCalibrationError,
     apply_color_matrix,
     calibrate_directory,
+    detect_chart_corners,
     fit_color_matrix,
     linear_to_srgb,
     load_config,
     locate_patch_centers,
+    rectify_chart,
     sample_patches,
     srgb_to_linear,
 )
@@ -70,6 +72,33 @@ def test_patch_grid_is_recovered_from_chart():
     assert np.all(np.diff(centers[:6, 0]) > 60)
 
 
+def test_chart_corners_are_detected_after_perspective_warp():
+    source = synthetic_chart()
+    canvas = np.full((700, 900, 3), 235, dtype=np.uint8)
+    expected = np.float32([[145, 105], [760, 155], [710, 585], [105, 535]])
+    transform = cv2.getPerspectiveTransform(
+        np.float32([[0, 0], [599, 0], [599, 399], [0, 399]]),
+        expected,
+    )
+    warped = cv2.warpPerspective(source, transform, (900, 700))
+    occupied = cv2.warpPerspective(
+        np.full(source.shape[:2], 255, dtype=np.uint8),
+        transform,
+        (900, 700),
+    )
+    canvas[occupied > 0] = warped[occupied > 0]
+
+    actual = detect_chart_corners(canvas)
+
+    assert np.max(np.linalg.norm(actual - expected, axis=1)) < 25
+    assert locate_patch_centers(rectify_chart(canvas, actual)).shape == (24, 2)
+
+
+def test_chart_detection_rejects_blank_image():
+    with pytest.raises(ColorCalibrationError, match="confidence checks"):
+        detect_chart_corners(np.full((400, 600, 3), 220, dtype=np.uint8))
+
+
 def test_apply_identity_is_exact():
     image = np.arange(12 * 8 * 3, dtype=np.uint8).reshape(12, 8, 3)
     assert np.array_equal(apply_color_matrix(image, np.eye(3, dtype=np.float32)), image)
@@ -107,6 +136,10 @@ def test_config_normalizes_camera_names_and_rejects_parent_paths(tmp_path):
     assert load_config(path).reference_camera == "camera1"
 
     data = json.loads(path.read_text())
+    del data["cameras"]["Camera1"]["corners"]
+    path.write_text(json.dumps(data))
+    assert load_config(path).cameras["camera1"].corners is None
+
     data["cameras"]["Camera1"]["reference_image"] = "../outside.png"
     path.write_text(json.dumps(data))
     with pytest.raises(ColorCalibrationError, match="inside input"):
