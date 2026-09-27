@@ -76,6 +76,10 @@ class Scene:
         """
         if not self.has_masks():
             return None
+
+        # A scene with masks but no images cannot be linked.
+        self.require_images()
+
         images_by_stem = {p.stem: p.name for p in self.images_dir.iterdir() if p.is_file()}
         dest.mkdir(parents=True, exist_ok=True)
         unmatched = []

@@ -1,1 +1,1 @@
-"""Backend-agnostic novel-view evaluation: the shared held-out split and the scorer."""
+"""Evaluation of a reconstruction: photometric (nvs), geometric (mesh), metric (scale)."""

@@ -66,7 +66,13 @@ class ColmapSfM(SfMMethod):
         ro.camera_model = self.config.camera_model
         eo = pycolmap.FeatureExtractionOptions()
         eo.max_image_size = self.config.max_image_size
-        eo.num_threads = -1
+        n_threads = len(os.sched_getaffinity(0))
+        eo.num_threads = n_threads
+        mo = pycolmap.FeatureMatchingOptions()
+        mo.num_threads = n_threads
+        po = pycolmap.IncrementalPipelineOptions()
+        po.num_threads = n_threads
+        logger.info(f"[colmap] {n_threads} thread(s) per stage")
 
         t = time.time()
         pycolmap.extract_features(db_path, str(out_dir / "images"),
@@ -75,13 +81,14 @@ class ColmapSfM(SfMMethod):
         logger.info(f"[colmap] extraction {time.time()-t:.0f}s")
 
         t = time.time()
-        pycolmap.match_exhaustive(db_path)
+        pycolmap.match_exhaustive(db_path, matching_options=mo)
         logger.info(f"[colmap] matching {time.time()-t:.0f}s")
 
         t = time.time()
         maps_dir = out_dir / "sparse"
         maps_dir.mkdir(exist_ok=True)
-        recs = pycolmap.incremental_mapping(db_path, str(out_dir / "images"), str(maps_dir))
+        recs = pycolmap.incremental_mapping(db_path, str(out_dir / "images"), str(maps_dir),
+                                            options=po)
         logger.info(f"[colmap] mapping {time.time()-t:.0f}s -> {len(recs)} model(s)")
 
         if not recs:

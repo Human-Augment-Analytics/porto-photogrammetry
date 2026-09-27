@@ -483,7 +483,12 @@ class TurntableRefiner(SceneRefiner):
         ro.camera_model = "SIMPLE_PINHOLE"
         eo = pycolmap.FeatureExtractionOptions()
         eo.max_image_size = args.max_image_size
-        eo.num_threads = 8
+        n_threads = len(os.sched_getaffinity(0))
+        eo.num_threads = n_threads
+        mo = pycolmap.FeatureMatchingOptions()
+        mo.num_threads = n_threads
+        po = pycolmap.IncrementalPipelineOptions()
+        po.num_threads = n_threads
 
         t0 = time.time()
         pycolmap.extract_features(db_path, str(out_dir / "images"),
@@ -491,7 +496,7 @@ class TurntableRefiner(SceneRefiner):
                                   reader_options=ro, extraction_options=eo)
         logger.info("SIFT extraction %.0fs", time.time() - t0)
         t0 = time.time()
-        pycolmap.match_exhaustive(db_path)
+        pycolmap.match_exhaustive(db_path, matching_options=mo)
         logger.info("Matching %.0fs", time.time() - t0)
 
         db = pycolmap.Database()
@@ -518,7 +523,8 @@ class TurntableRefiner(SceneRefiner):
             out_rec.add_image_with_trivial_frame(img, rigid)
 
         out_sparse = str(out_dir / "sparse" / "0")
-        tri = pycolmap.triangulate_points(out_rec, db_path, str(out_dir / "images"), out_sparse)
+        tri = pycolmap.triangulate_points(out_rec, db_path, str(out_dir / "images"), out_sparse,
+                                          options=po)
         tl = [pt.track.length() for pt in tri.points3D.values()]
         tri.write(out_sparse)
         logger.info("Triangulated %d points, %d images, mean track %.2f",
