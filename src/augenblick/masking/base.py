@@ -43,6 +43,8 @@ class MaskCommonConfig:
                 "so detached foreground (scale bars, separated parts) survives"})
     fill_holes: bool = field(default=True, metadata={
         "help": "Fill enclosed background holes inside the silhouette"})
+    batch_log_every: int = field(default=25, metadata={
+        "help": "Log progress every N images"})
 
 
 def postprocess_mask(mask, keep_largest: bool, fill_holes: bool):
@@ -95,6 +97,13 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
     def mask_for(self, image_path: Path):
         """Return a bool numpy array [H, W], True on the specimen, matching image dims."""
 
+    def prepare(self) -> None:
+        """One-time setup (e.g. loading a model) before any image is masked.
+
+        Runs outside the per-image try, so an error here aborts the run instead of being
+        counted as a failure for every image. No-op by default.
+        """
+
     def header(self, images_dir: Path, output_dir: Path) -> dict[str, object]:
         """Key/value lines logged under the banner; subclasses may extend this."""
         return {"Images": images_dir, "Output": output_dir, "Method": self.name}
@@ -114,6 +123,7 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
         from PIL import Image
 
         self.validate(images_dir)
+        self.prepare()
         Image.MAX_IMAGE_PIXELS = None
         images_dir = images_dir.resolve()
         out_dir = output_dir.resolve()
@@ -141,10 +151,16 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
         result = MaskResult(
             output_dir=out_dir, elapsed=0.0, num_images=len(image_paths))
 
+        every = max(1, cfg.batch_log_every)
         t0 = time.time()
         timer = StageTimer(self.title, 1, self.header(images_dir, out_dir))
         with timer.stage("Masking"):
             for i, path in enumerate(image_paths):
+                if i and i % every == 0:
+                    logger.info(
+                        f"{self.name}: {i}/{result.num_images} images (written "
+                        f"{result.num_written}, reused {result.num_reused}, "
+                        f"failed {result.num_failed})")
                 dest = masks_dir / f"{path.stem}.png"
                 if cfg.only_missing and dest.exists():
                     result.num_reused += 1

@@ -26,8 +26,6 @@ class RembgConfig(MaskCommonConfig):
     providers: Optional[str] = field(default=None, metadata={
         "help": "Comma-separated ONNX providers; default lets onnxruntime pick "
                 "(CUDAExecutionProvider first when GPU is available)"})
-    batch_log_every: int = field(default=25, metadata={
-        "help": "Log progress every N images"})
 
 
 @register_mask
@@ -41,7 +39,6 @@ class RembgMask(MaskMethod):
     def __init__(self, config: RembgConfig):
         super().__init__(config)
         self._session = None
-        self._count = 0
 
     def _get_session(self):
         if self._session is not None:
@@ -81,10 +78,4 @@ class RembgMask(MaskMethod):
         arr = np.asarray(cut)
         if arr.ndim == 3:
             arr = arr[..., -1]
-        mask = arr > self.config.alpha_threshold
-
-        self._count += 1
-        every = max(1, self.config.batch_log_every)
-        if self._count % every == 0:
-            logger.info(f"rembg: masked {self._count} images")
-        return mask
+        return arr > self.config.alpha_threshold

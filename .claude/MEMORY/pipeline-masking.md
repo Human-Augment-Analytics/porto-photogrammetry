@@ -43,7 +43,7 @@ disable masking while looking successful).
   selects what to segment, discriminating where a matting model cannot — `skeleton` isolates a
   specimen and leaves scale bars out. Key flags: `--prompt` (default `skeleton`),
   `--score_threshold` (0.5), `--max_detections` (0 = all above threshold), `--checkpoint_path`,
-  `--device`, `--batch_log_every`.
+  `--device`.
 
   Detections surviving the threshold are **unioned**, not argmaxed: a specimen routinely returns
   as several instances (cranium, mandible), and taking only the top score would drop the rest.
@@ -54,10 +54,9 @@ disable masking while looking successful).
   `torch.autocast(device_type, dtype=torch.bfloat16)` every image dies with `mat1 and mat2 must
   have the same dtype`. Upstream shows this only in `sam3/scripts/*.py`, not the README or the
   processor docstring.
-- **Cast off bfloat16 before `.numpy()`**, or numpy raises `Got unsupported ScalarType
-  BFloat16`. The fix for the previous trap exposes this one.
-- **Check for zero detections before reshaping**, else an empty result raises `cannot reshape
-  array of size 0` instead of the intended `SceneError`.
+- **Cast `scores` off bfloat16 before `.numpy()`**, or numpy raises `Got unsupported ScalarType
+  BFloat16`. The fix for the previous trap exposes this one. `masks` is bool and needs no cast.
+- **`mask_for` trusts the vendored output shape.** `_forward_grounding` returns bool `[N, 1, H, W]` masks at source dims, and `mask_for` just takes `[:, 0]` with no defensive normalisation. An upstream sync that changes this shows up as per-image failures (an `IndexError`, or the base shape check rejecting every mask), not as bad masks.
 - **`build_sam3_image_model(device="cpu")` does not work** — `position_encoding.py` and
   `decoder.py` hardcode `device="cuda"`. Fetch the checkpoint with `hf download` or inside the
   job; never build the model on a login node.
@@ -75,7 +74,7 @@ Hopper and must stay. Full prune list: `.claude/PLANS/sam3-masking-method.md`.
 
 Shared flags (all methods): `--only_missing` (underscore, not `--only-missing`; skips images
 that already have a mask), `--min_foreground`/`--max_foreground` (reject bounds),
-`--keep_largest`, `--fill_holes`.
+`--keep_largest`, `--fill_holes`, `--batch_log_every` (progress line from `MaskMethod.run`).
 
 `--only_missing` reuses what is on disk **without checking how it was produced**, so masks
 written during a silent CPU fallback survive every rerun and look like a cache hit. After
@@ -118,5 +117,5 @@ A masking job should still guard against silent CPU fallback, since ORT reports 
 provider as available even when it cannot load it. See cluster-slurm.md and environment-and-gpu.md.
 
 `pace_slurm/mask.sbatch` takes `MASK_METHOD=rembg|threshold|sam3`. For `sam3` it preflights
-CUDA, because the method cannot fall back to CPU. The checkpoint lands in `$HF_HOME`, which
-`common.sh` exports for every job (see cluster-slurm.md).
+CUDA, because the method cannot fall back to CPU. That preflight is now optional:
+`augenblick mask sam3` itself exits 2 from `prepare()` when there is no CUDA device, or when the checkpoint is gated or missing from an offline cache (`GatedRepoError`, `LocalEntryNotFoundError`). The checkpoint lands in `$HF_HOME`, which `common.sh` exports for every job (see cluster-slurm.md).

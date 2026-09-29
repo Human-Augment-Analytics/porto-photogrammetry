@@ -68,7 +68,6 @@ $PIP install -e src/libs/light_glue --no-build-isolation
 
 # --- 4. SAM 3 (concept-prompted masking) --------------------------------------
 banner "4/9 SAM 3 (editable, --no-deps)"
-$PIP install timm ftfy regex --no-deps
 $PIP install -e src/libs/sam3 --no-deps --no-build-isolation
 
 # --- 5. pytorch3d (source build, arch-agnostic; or prebuilt wheel) ------------

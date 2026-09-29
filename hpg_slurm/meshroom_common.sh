@@ -64,14 +64,12 @@ gpu_supported() {
     esac
 }
 
-# A label for the gate only; nothing here varies per GPU. HPG names the card in
-# --gpus=<model>:1 rather than a gres, so read that too.
-GPU="${GPU:-}"
-if [ -z "$GPU" ]; then
-    GPU="$(echo "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-${SBATCH_GRES:-}}}" \
-        | grep -oE '[a-z0-9_]+' | grep -vE '^(gpu|[0-9]+)$' | head -1)"
-    GPU="${GPU:-unknown}"
-fi
+# A label for the gate only; nothing here varies per GPU. HPG jobs ask for a bare
+# --gpus=1 and pick the card by partition (hpg-rtx6000, hpg-b200).
+_partition="${SLURM_JOB_PARTITION:-}"
+GPU="${GPU:-${_partition#hpg-}}"
+GPU="${GPU:-unknown}"
+unset _partition
 
 _sm="$(gpu_supported "$GPU")"
 if [ "$_sm" -lt 0 ]; then
