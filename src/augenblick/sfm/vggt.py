@@ -17,7 +17,7 @@ from typing import ClassVar
 
 from augenblick.core.registry import register_sfm
 from augenblick.core.scene import Scene
-from augenblick.sfm.base import SfMMethod, SfMResult
+from augenblick.sfm.base import SfMMethod, SfMResult, link_dir
 
 logger = logging.getLogger(__name__)
 
@@ -156,18 +156,6 @@ def rename_colmap_recons_and_rescale_camera(
             rescale_camera = False
 
     return reconstruction
-
-
-def _link_dir(src: Path, dst: Path) -> None:
-    """Symlink dst -> src, replacing a stale link left by an earlier run."""
-    # lexists, not exists: a link dangling from a moved scene still blocks os.symlink.
-    if dst.is_symlink():
-        dst.unlink()
-    elif os.path.lexists(dst):
-        logger.warning("%s exists and is not a symlink; leaving it in place", dst)
-        return
-    os.symlink(src, dst)
-    logger.info("Linked %s -> %s", dst, src)
 
 
 @register_sfm
@@ -425,9 +413,9 @@ class VGGTSfM(SfMMethod):
             trimesh.PointCloud(points_3d, colors=points_rgb).export(
                 os.path.join(out_dir_str, "sparse/0/points.ply"))
 
-            _link_dir(scene.images_dir, output_dir / "images")
+            link_dir(scene.images_dir, output_dir / "images")
             if scene.has_masks():
-                _link_dir(scene.masks_dir, output_dir / "masks")
+                link_dir(scene.masks_dir, output_dir / "masks")
 
             total_time = time.time() - t_start
             logger.info("=" * 60)

@@ -12,6 +12,7 @@ roots) — the job logic is identical.
 MASK_METHOD=rembg sbatch hpg_slurm/mask.sbatch
 sbatch hpg_slurm/vggt_sfm.sbatch
 sbatch hpg_slurm/vggt_ba_sfm.sbatch
+sbatch hpg_slurm/dvlt_sfm.sbatch                # RTX only
 sbatch hpg_slurm/colmap_sfm.sbatch
 SFM=colmap sbatch hpg_slurm/turntable_sfm.sbatch
 SFM=colmap sbatch hpg_slurm/hull_sfm.sbatch
@@ -60,6 +61,7 @@ For anything not covered, copy `template.sbatch` and edit its command block.
 | `mask.sbatch` | `MASK_METHOD=rembg\|threshold\|sam3`; consumes `<scene>/images`, emits a scene |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |
 | `vggt_ba_sfm.sbatch` | Same with `--use_ba` |
+| `dvlt_sfm.sbatch` | DVLT -> COLMAP (feed-forward, no BA), one array task per scene; RTX env only |
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |

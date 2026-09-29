@@ -66,9 +66,10 @@ banner "3/9 VGGT + LightGlue (editable)"
 $PIP install -e src/libs/vggt       --no-build-isolation
 $PIP install -e src/libs/light_glue --no-build-isolation
 
-# --- 4. SAM 3 (concept-prompted masking) --------------------------------------
-banner "4/9 SAM 3 (editable, --no-deps)"
+# --- 4. SAM 3 (concept-prompted masking) + DVLT (feed-forward SfM) -----------
+banner "4/9 SAM 3 + DVLT (editable, --no-deps)"
 $PIP install -e src/libs/sam3 --no-deps --no-build-isolation
+$PIP install -e src/libs/dvlt --no-deps --no-build-isolation
 
 # --- 5. pytorch3d (source build, arch-agnostic; or prebuilt wheel) ------------
 banner "5/9 pytorch3d"
