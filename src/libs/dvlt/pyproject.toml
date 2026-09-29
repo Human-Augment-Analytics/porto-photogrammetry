@@ -1,0 +1,139 @@
+[project]
+name = "dvlt"
+version = "0.0.1"
+description = "Déjà View: Looping Transformers for Multi-View 3D Reconstruction"
+readme = "README.md"
+# LOCAL PATCH (augenblick): relaxed from ">= 3.11"; pure-Python, and
+# `python -m compileall src/` passes clean on 3.10.
+requires-python = ">= 3.10"
+license = { file = "LICENSE" }
+authors = [
+    {name = "Tobias Fischer", email = "tobiasfischer623@gmail.com"},
+    {name = "Alessandro Burzio", email = "aburzio@nvidia.com"},
+    {name = "Haithem Turki", email = "hturki@nvidia.com"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+# LOCAL PATCH (augenblick): this copy is trimmed to the inference path (model +
+# preprocessing), so the list is exactly what its code imports. Dropped with the
+# training/eval/demo code: accelerate, h5py, hydra-core, omegaconf, pydantic, scipy,
+# tqdm, rich, tensorboard, wandb, matplotlib, plotly, rerun-sdk, and the demos/dev
+# extras. `requests` moved here from `demos` (util/download.py imports it).
+dependencies = [
+    "huggingface-hub",
+    "numpy",
+    "open3d",
+    "opencv-python-headless",
+    "Pillow",
+    "requests",
+    "safetensors",
+    "torch",
+    "torchvision",
+]
+
+
+# Using setuptools as the build backend
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# setuptools configuration
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dvlt*"]
+
+# Black configuration
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+include = '\.pyi?$'
+extend-exclude = '''
+# A regex preceded with ^/ will apply only to files and directories
+# in the root of the project.
+^/build/
+'''
+
+# Ruff configuration
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+# Enable various linting rules:
+# E: pycodestyle errors (PEP 8 style guide)
+# F: Pyflakes (detects logical errors)
+# I: isort (import sorting)
+# N: pep8-naming (naming conventions)
+# W: pycodestyle warnings
+# B: flake8-bugbear (additional bug detection)
+# UP: pyupgrade (upgrade syntax to newer Python)
+# PL: Pylint (general Python linting)
+# RUF: Ruff-specific rules
+lint.select = ["E", "F", "I", "W", "B", "PLE", "PLW", "PLC", "PLR"]
+lint.ignore = [
+    "E731",  # lambda expression
+    "E501",  # Line too long.
+    "PLR2004",  # Magic value used in comparison.
+    "PLR0915",  # Too many statements.
+    "PLR0913",  # Too many arguments.
+    "PLC0414",  # Import alias does not rename variable. (this is used for exporting names)
+    "PLC1901",  # Use falsey strings.
+    "PLR0911",  # Too many return statements.
+    "PLR0912",  # Too many branches.
+    "PLW2901",  # For loop variable overwritten.
+    "B027",     # Allow empty methods in abstract base class
+]
+
+# Specify directories that should be checked
+include = ["src/**/*.py"]
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+# Allow unused variables when underscore-prefixed.
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["dvlt"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
