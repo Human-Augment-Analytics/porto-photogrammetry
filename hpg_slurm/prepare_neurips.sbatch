@@ -72,7 +72,7 @@ python pipeline/preparation/prepare_uf_dataset.py "$SRC" \
 
 # Masks are optional downstream, but an empty images/ means the scene is unusable.
 N_IMAGES=$(find "$OUT/images" -type l 2>/dev/null | wc -l)
-N_MASKS=$(find "$OUT/masks" -type l 2>/dev/null | wc -l)
+N_MASKS=$( (find "$OUT/masks" -type l 2>/dev/null || true) | wc -l)
 echo "result     : $N_IMAGES image(s), $N_MASKS mask(s) in $OUT"
 
 if [ "$N_IMAGES" -eq 0 ]; then

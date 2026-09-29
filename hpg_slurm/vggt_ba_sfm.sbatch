@@ -36,7 +36,7 @@ OUT="$RESULT_ROOT/$SCENE_NAME/vggt_ba"
 mkdir -p "$OUT"
 
 N_IMAGES=$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)
-N_MASKS=$(ls -1 "$SCENE/masks" 2>/dev/null | wc -l)
+N_MASKS=$( (ls -1 "$SCENE/masks" 2>/dev/null || true) | wc -l)
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]}) -> $OUT"
 echo "images     : $N_IMAGES"
