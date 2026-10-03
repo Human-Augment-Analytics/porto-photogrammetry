@@ -10,6 +10,7 @@
 #   SCENE=output/UF_Fish_245298/all/colmap \
 #   MESH=output/UF_Fish_245298/all/colmap-2dgs/train/ours_30000/fuse_post.ply \
 #   OUTPUT=output/UF_Fish_245298/all/colmap-2dgs \
+#   SAMPLING_MODE=bilinear \
 #   sbatch pace_slurm/photobake_eval.sbatch
 #SBATCH --job-name=photobake-eval
 #SBATCH --partition=coc-gpu
@@ -43,6 +44,7 @@ VANILLA_CHECKPOINT="${VANILLA_CHECKPOINT:-output/UF_Fish_245298/all/colmap-sugar
 ITERATION_TO_LOAD="${ITERATION_TO_LOAD:-7000}"
 PHOTO_MAX_SIZE="${PHOTO_MAX_SIZE:--1}"
 SQUARE_SIZE="${SQUARE_SIZE:-10}"
+SAMPLING_MODE="${SAMPLING_MODE:-nearest}"
 
 PYTHONPATH=src python src/libs/sugar/photobake_mesh.py \
     --scene "$SCENE" \
@@ -51,6 +53,7 @@ PYTHONPATH=src python src/libs/sugar/photobake_mesh.py \
     --mesh "$MESH" \
     --output "$OUTPUT" \
     --square-size "$SQUARE_SIZE" \
-    --photo-max-size "$PHOTO_MAX_SIZE"
+    --photo-max-size "$PHOTO_MAX_SIZE" \
+    --sampling-mode "$SAMPLING_MODE"
 
 echo "PHOTOBAKE_EVAL_DONE native -> $OUTPUT/nvs_metrics_mesh_native.json  photofull -> $OUTPUT/nvs_metrics_mesh_photofull.json"
