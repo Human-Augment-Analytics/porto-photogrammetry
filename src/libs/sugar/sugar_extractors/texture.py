@@ -69,6 +69,81 @@ def _accumulate_samples(face_colors, face_count, texture_img, texture_count,
     texture_count.view(-1, 1).index_add_(0, flat_pixels, ones)
 
 
+def _uv_texel_mask(verts_uv, faces_uv, texture_size, batch_size=16384):
+    """Rasterize the packed UV triangles at texel centers into an atlas-validity mask."""
+    uv_pixels = verts_uv * texture_size
+    valid = torch.zeros((texture_size, texture_size), dtype=torch.bool,
+                        device=verts_uv.device)
+
+    for start in range(0, len(faces_uv), batch_size):
+        triangles = uv_pixels[faces_uv[start:start + batch_size]]
+        minimum = torch.floor(triangles.amin(dim=1)).to(torch.int64)
+        maximum = torch.floor(triangles.amax(dim=1)).to(torch.int64)
+        spans = maximum - minimum
+        offsets = torch.arange(int(spans.max().item()) + 1, device=verts_uv.device)
+
+        grid_x, grid_y = torch.meshgrid(offsets, offsets, indexing="xy")
+        pixel_x = minimum[:, 0, None] + grid_x.flatten()[None, :]
+        pixel_y = minimum[:, 1, None] + grid_y.flatten()[None, :]
+        in_bounds = ((pixel_x <= maximum[:, 0, None]) & (pixel_y <= maximum[:, 1, None]) &
+                     (pixel_x >= 0) & (pixel_x < texture_size) &
+                     (pixel_y >= 0) & (pixel_y < texture_size))
+
+        points = torch.stack((pixel_x.to(uv_pixels.dtype) + 0.5,
+                              pixel_y.to(uv_pixels.dtype) + 0.5), dim=-1)
+        first, second, third = triangles.unbind(dim=1)
+        denominator = ((second[:, 1] - third[:, 1]) * (first[:, 0] - third[:, 0]) +
+                       (third[:, 0] - second[:, 0]) * (first[:, 1] - third[:, 1]))
+        denominator = denominator[:, None]
+        first_weight = ((second[:, 1, None] - third[:, 1, None]) *
+                        (points[..., 0] - third[:, 0, None]) +
+                        (third[:, 0, None] - second[:, 0, None]) *
+                        (points[..., 1] - third[:, 1, None])) / denominator
+        second_weight = ((third[:, 1, None] - first[:, 1, None]) *
+                         (points[..., 0] - third[:, 0, None]) +
+                         (first[:, 0, None] - third[:, 0, None]) *
+                         (points[..., 1] - third[:, 1, None])) / denominator
+        third_weight = 1 - first_weight - second_weight
+        inside = ((first_weight >= -1e-6) & (second_weight >= -1e-6) &
+                  (third_weight >= -1e-6) & in_bounds)
+        flat_pixels = pixel_y * texture_size + pixel_x
+        valid.view(-1)[flat_pixels[inside]] = True
+
+    return valid
+
+
+def _accumulate_camera_support(camera_support, texture_pixels):
+    """Count a camera once per texel, regardless of its number of raster samples."""
+    texture_size = camera_support.shape[1]
+    flat_pixels = texture_pixels[:, 1] * texture_size + texture_pixels[:, 0]
+    unique_pixels = torch.unique(flat_pixels)
+    camera_support.view(-1).index_add_(
+        0, unique_pixels, torch.ones_like(unique_pixels, dtype=camera_support.dtype))
+
+
+def _coverage_summary(valid_uv, camera_support):
+    """Summarize sampled coverage and distinct-camera support over valid UV texels."""
+    support = camera_support[valid_uv]
+    valid_count = int(valid_uv.sum().item())
+    if valid_count == 0:
+        raise ValueError("mesh UVs cover no texel centers")
+    counts = {
+        "zero": int((support == 0).sum().item()),
+        "one": int((support == 1).sum().item()),
+        "two_or_more": int((support >= 2).sum().item()),
+    }
+    return {
+        "valid_texels": valid_count,
+        "covered_texels": valid_count - counts["zero"],
+        "coverage": (valid_count - counts["zero"]) / valid_count,
+        "support_distribution": {
+            key: {"count": count, "fraction": count / valid_count}
+            for key, count in counts.items()
+        },
+        "maximum_camera_support": int(support.max().item()),
+    }
+
+
 @torch.no_grad()
 def compute_textured_mesh_for_sugar_mesh(
     sugar:SuGaR,
