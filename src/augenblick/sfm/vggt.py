@@ -57,10 +57,11 @@ class VGGTConfig:
                 "per frame absolutely, so masked scenes need a large budget to clear it"})
     fine_tracking: bool = field(default=True, metadata={
         "help": "Use fine tracking (slower but more accurate)"})
-    conf_thres_value: float = field(default=2.0, metadata={
-        "help": "Minimum VGGT depth confidence, applied in both modes: without --use_ba it "
-                "selects which depth pixels become 3D points; with --use_ba the tracker "
-                "samples the same map at each query point and drops those below it"})
+    conf_perc_thresh: float = field(default=25.0, metadata={
+        "help": "Percentile (0-100) of VGGT depth confidence, over unmasked pixels, below "
+                "which pixels are dropped, applied in both modes: without --use_ba it selects "
+                "which depth pixels become 3D points; with --use_ba the tracker samples the "
+                "same map at each query point and drops those below it"})
 
 
 def run_VGGT(model, images, masks, dtype, resolution=518):
@@ -199,6 +200,8 @@ class VGGTSfM(SfMMethod):
 
         self.validate(scene)
         args = self.config
+        if not 0.0 <= args.conf_perc_thresh <= 100.0:
+            raise ValueError(f"--conf_perc_thresh must be in [0, 100], got {args.conf_perc_thresh}")
         input_dir = str(scene.root)
         out_dir_str = str(output_dir)
 
@@ -280,6 +283,14 @@ class VGGTSfM(SfMMethod):
             vggt_time = time.time() - t0
             logger.info(f"VGGT inference completed in {vggt_time:.1f}s")
 
+            # Masking zeroes depth_conf outside the subject, so percentile is
+            # taken over surviving pixels only.
+            valid_conf = depth_conf > 0
+            if not valid_conf.any():
+                raise ValueError("Masks leave no pixels with positive depth confidence")
+            conf_thresh = float(np.percentile(depth_conf[valid_conf], args.conf_perc_thresh))
+            logger.info(f"Confidence p{args.conf_perc_thresh:g} = {conf_thresh:.3g}")
+
             if args.use_ba:
                 t0 = time.time()
                 image_size = np.array(images.shape[-2:])
@@ -322,7 +333,7 @@ class VGGTSfM(SfMMethod):
                         query_frame_num=args.query_frame_num,
                         keypoint_extractor="aliked+sp",
                         fine_tracking=args.fine_tracking,
-                        conf_thresh=args.conf_thres_value
+                        conf_thresh=conf_thresh
                     )
 
                     torch.cuda.empty_cache()
@@ -375,7 +386,7 @@ class VGGTSfM(SfMMethod):
                 # (S, H, W, 3), with x, y coordinates and frame indices
                 points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
-                conf_mask = depth_conf >= args.conf_thres_value
+                conf_mask = valid_conf & (depth_conf >= conf_thresh)
                 conf_mask = randomly_limit_trues(conf_mask, max_points_for_colmap)
 
                 points_3d = points_3d[conf_mask]

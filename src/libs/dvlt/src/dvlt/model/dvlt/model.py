@@ -46,6 +46,8 @@ from dvlt.model_components import (
     vit_small,
 )
 from dvlt.struct.util import extri_intri_to_cameras
+# LOCAL PATCH (augenblick): for use_seg_mask_for_pose; preprocess imports only constants.
+from dvlt.util.preprocess import SEGMENTATION_MASK_FIELD
 
 from .blocks import LoopedAABlock
 from .heads import DecoderHead, SimpleCameraHead
@@ -676,6 +678,8 @@ class DVLT(Module):
         decode_chunk_size: Optional[int] = None,
         use_depth_conf_for_pose: bool = False,
         world_points_from_rays: bool = False,
+        # LOCAL PATCH (augenblick): weight the pose fit by the batch's segmentation mask.
+        use_seg_mask_for_pose: bool = False,
         *args,
         **kwargs,
     ):
@@ -691,6 +695,10 @@ class DVLT(Module):
                 unprojection entirely. Default ``False`` keeps the current
                 behavior (``WORLD_POINTS`` = depth unprojected via fitted pose;
                 ``WORLD_POINTS_DIRECT`` = rays+depth, unchanged either way).
+            use_seg_mask_for_pose: If True and the batch carries
+                ``gradio_segmentation_mask``, multiply the pose-fit weights by it so
+                ``rays_to_pose`` fits each camera to masked-in pixels only. A frame
+                whose mask is empty keeps its unmasked weights.
             finetune_mode: Selective unfreezing after loading a pretrained checkpoint.
                 None — normal training, everything trainable.
                 "depth_output" — freeze all, unfreeze only depth decoder output stage
@@ -754,6 +762,7 @@ class DVLT(Module):
         self.decode_chunk_size = decode_chunk_size
         self.use_depth_conf_for_pose = use_depth_conf_for_pose
         self.world_points_from_rays = world_points_from_rays
+        self.use_seg_mask_for_pose = use_seg_mask_for_pose
 
         # When finetuning, restrict gradient checkpointing to the modules that
         # are actually being trained. Checkpointing frozen modules (no backward)
@@ -920,6 +929,13 @@ class DVLT(Module):
         rays = predictions["rays"]
         depth_conf = predictions["depth_conf"]
         pose_conf = depth_conf if self.use_depth_conf_for_pose else torch.ones_like(depth_conf)
+        # LOCAL PATCH (augenblick): optional mask-weighted pose fit; see use_seg_mask_for_pose.
+        seg = batch.get(SEGMENTATION_MASK_FIELD)
+        if self.use_seg_mask_for_pose and seg is not None:
+            seg = seg.to(pose_conf.dtype)
+            # An all-zero mask would zero every weight: RANSAC degenerates and T collapses to 0.
+            has_fg = seg.flatten(2).any(dim=-1)[..., None, None]
+            pose_conf = torch.where(has_fg, pose_conf * seg, pose_conf)
         extrinsics_c2w, intrinsics = rays_to_pose(rays, pose_conf, H, W, self.patch_size)
         cameras = [extri_intri_to_cameras(e, i, (H, W)) for e, i in zip(extrinsics_c2w, intrinsics, strict=False)]
         preds = {

@@ -19,7 +19,7 @@ augenblick sfm vggt \
     --input_dir <dir>            \  # must contain images/
     --output_dir <dir>           \
     [--use_masks] [--mask_erode_px 3] [--seed 42] \
-    [--conf_thres_value 2.0]     \  # VGGT depth-confidence floor, both modes
+    [--conf_perc_thresh 25.0]    \  # depth-confidence percentile floor, both modes
     [--use_ba]                   \  # VGGSfM tracker + pycolmap BA
     [--shared_camera] [--camera_type SIMPLE_PINHOLE] \
     [--max_reproj_error 8.0] [--vis_thresh 0.2] \
@@ -38,18 +38,19 @@ silhouette seam do not seed tracks that drift onto the turntable. A frame with n
 unconstrained, not empty. Loaders never composite masks into the image; RGBA inputs flatten onto
 black — 0 reads as "nothing here" downstream — masked or not.
 
-- **No BA (default):** VGGT depth + camera predictions directly; filter by `conf_thres_value`,
+- **No BA (default):** VGGT depth + camera predictions directly; filter by `conf_perc_thresh`,
   random-subsample to 100k points, write PINHOLE cameras at 518 px, then rescale to original
   resolution.
 - **With `--use_ba`:** VGGSfM tracker for correspondences, then `pycolmap.bundle_adjustment()`.
   Operates at 1024 px internally; supports SIMPLE_PINHOLE and shared-camera modes.
 
-`conf_thres_value` is one floor on one quantity — VGGT's `depth_conf` map — read in both modes:
-without BA it selects which depth pixels become 3D points; with BA the tracker samples the same
-map at each query point and drops the ones below it. Two traps: the BA-path filter is skipped
-entirely unless more than 512 query points clear it, so a low-confidence frame keeps all of them;
-and it replaced a hardcoded 1.2, so BA runs predating that were filtered more loosely and are not
-comparable to ones at the 2.0 default.
+`conf_perc_thresh` (default 25) is a percentile of VGGT's `depth_conf` map, taken over pixels with
+confidence > 0 (masking zeroes the background; VGGT's own confidence is > 1) and turned into one
+absolute floor per run, read in both modes: without BA it selects which depth pixels become 3D
+points; with BA the tracker samples the same map at each query point and drops the ones below it.
+Two traps: the BA-path filter is skipped entirely unless more than 512 query points clear it, so a
+low-confidence frame keeps all of them; and earlier runs used an absolute floor (hardcoded 1.2,
+then `conf_thres_value` 2.0), so they are not comparable to percentile-filtered ones.
 
 BA drops a frame with fewer than `min_inlier_per_frame` surviving tracks instead of aborting, and
 skips BA outright unless `min_valid_frames` — a *fraction* of the frame count, not a count — still

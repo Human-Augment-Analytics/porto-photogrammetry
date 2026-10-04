@@ -279,7 +279,7 @@ augenblick sfm vggt \
 augenblick sfm vggt \
     --scene /path/to/scene/ \
     --output /output/vggt/ \
-    --conf_thres_value 2.0
+    --conf_perc_thresh 25.0
 
 # Masked COLMAP (SIFT restricted to the object masks)
 # Incremental SfM via pycolmap; features are only extracted inside masks/,

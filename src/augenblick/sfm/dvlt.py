@@ -36,8 +36,12 @@ class DVLTConfig:
     img_size: int = field(default=504, metadata={
         "help": "Longest image edge fed to the network; H and W are then centre-cropped to "
                 "multiples of 14"})
-    conf_thres_value: float = field(default=2.0, metadata={
-        "help": "Minimum DVLT depth confidence for a pixel to become a 3D point"})
+    conf_perc_thresh: float = field(default=25.0, metadata={
+        "help": "Percentile (0-100) of DVLT depth confidence, over valid (and, with "
+                "--use_masks, masked-in) pixels, below which a pixel does not become a 3D point"})
+    mask_pose_fit: bool = field(default=False, metadata={
+        "help": "Also weight the camera-pose fit by the masks, so poses come from masked-in "
+                "pixels only (needs --use_masks; a frame with an empty mask stays unweighted)"})
     max_points: int = field(default=100_000, metadata={
         "help": "Randomly subsample the point cloud to at most this many points"})
     decode_chunk_size: int = field(default=32, metadata={
@@ -157,6 +161,10 @@ class DVLTSfM(SfMMethod):
             raise ValueError(f"--inference_steps must be >= 1, got {args.inference_steps}")
         if args.decode_chunk_size < 1:
             raise ValueError(f"--decode_chunk_size must be >= 1, got {args.decode_chunk_size}")
+        if not 0.0 <= args.conf_perc_thresh <= 100.0:
+            raise ValueError(f"--conf_perc_thresh must be in [0, 100], got {args.conf_perc_thresh}")
+        if args.mask_pose_fit and not args.use_masks:
+            raise ValueError("--mask_pose_fit needs --use_masks")
         if not SUPPORTED_STEPS[0] <= args.inference_steps <= SUPPORTED_STEPS[1]:
             logger.warning(f"--inference_steps {args.inference_steps} is outside the evaluated "
                            f"range {SUPPORTED_STEPS[0]}-{SUPPORTED_STEPS[1]}; proceeding")
@@ -168,6 +176,7 @@ class DVLTSfM(SfMMethod):
         logger.info(f"  Output:    {out_dir_str}")
         logger.info(f"  Steps (K): {args.inference_steps}")
         logger.info(f"  Use masks: {args.use_masks}")
+        logger.info(f"  Mask pose: {args.mask_pose_fit}")
         logger.info("=" * 60)
         t_start = time.time()
 
@@ -194,7 +203,8 @@ class DVLTSfM(SfMMethod):
         # load_patch_embed_weights=True triggers is overwritten by load_pretrained anyway.
         # The decoders run per frame, so chunking them does not change the output.
         model = DVLT(img_size=args.img_size, inference_steps=args.inference_steps,
-                     decode_chunk_size=args.decode_chunk_size, load_patch_embed_weights=False)
+                     decode_chunk_size=args.decode_chunk_size, load_patch_embed_weights=False,
+                     use_seg_mask_for_pose=args.mask_pose_fit)
         model.load_pretrained(args.checkpoint, strict=True)
         model.setup_test(device)
         logger.info(f"Model loaded in {time.time() - t0:.1f}s")
@@ -242,15 +252,20 @@ class DVLTSfM(SfMMethod):
         # (S, H, W, 3), with x, y coordinates and frame indices
         points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
-        conf_mask = depth_conf >= args.conf_thres_value
-        logger.info(f"Confidence >= {args.conf_thres_value} keeps {conf_mask.mean():.1%} of pixels")
         # Pad pixels (only when aspect ratios differ) are not real image content.
-        conf_mask &= batch["gradio_valid_pixels"][0].cpu().numpy()
-        conf_mask &= np.isfinite(points_3d).all(axis=-1)
+        valid = batch["gradio_valid_pixels"][0].cpu().numpy().astype(bool)
+        valid &= np.isfinite(points_3d).all(axis=-1)
         if masks is not None:
-            # The model does not read the mask; it only selects which pixels become points.
-            conf_mask &= batch[SEGMENTATION_MASK_FIELD][0].cpu().numpy()
-            logger.info(f"After masking {conf_mask.mean():.1%} of pixels remain")
+            valid &= batch[SEGMENTATION_MASK_FIELD][0].cpu().numpy().astype(bool)
+            logger.info(f"After masking {valid.mean():.1%} of pixels remain")
+        if not valid.any():
+            raise ValueError("No valid pixels remain to threshold on confidence")
+
+        # The percentile is over candidate pixels, so masking does not shift the cutoff.
+        conf_thresh = float(np.percentile(depth_conf[valid], args.conf_perc_thresh))
+        conf_mask = valid & (depth_conf >= conf_thresh)
+        logger.info(f"Confidence >= p{args.conf_perc_thresh:g} ({conf_thresh:.3g}) keeps "
+                    f"{conf_mask.mean():.1%} of pixels")
         conf_mask = randomly_limit_trues(conf_mask, args.max_points)
 
         points_3d = points_3d[conf_mask]
