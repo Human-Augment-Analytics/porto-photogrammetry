@@ -199,6 +199,23 @@ class TestSlidingWindowScale:
         assert failing, "windows spanning the shift must fail"
         assert not result["accepted"]
 
+    def test_short_ring_is_skipped(self):
+        """A ring shorter than one window must be recorded and excluded, not wrapped."""
+        tracks, rings = synthetic_rig(noise=0.1)
+        stub = [f"r0_v{v:03d}" for v in range(10)]
+        result = scale.sliding_window_scale(tracks, [stub] + rings[1:], BARS)
+        assert result["skipped_rings"] == [
+            {"ring": 0, "images": 10, "error": "shorter than one 24-view window"}]
+        assert all(w["ring"] >= 1 for w in result["windows"])
+
+    def test_single_usable_ring_is_reported_up_front(self):
+        """An input that can never be accepted must say so, not just fail the gates."""
+        tracks, rings = synthetic_rig(noise=0.1)
+        result = scale.sliding_window_scale(tracks, rings[:1], BARS)
+        assert not result["accepted"]
+        assert "cannot produce an accepted scale" in result["note"]
+        assert len(result["windows"]) == 9  # diagnostics are still evaluated
+
     def test_missing_code_raises(self):
         tracks, rings = synthetic_rig()
         del tracks["B2"]
