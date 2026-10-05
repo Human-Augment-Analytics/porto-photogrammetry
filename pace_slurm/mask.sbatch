@@ -1,6 +1,6 @@
 #!/bin/bash
 # Masking stage for every scene under DATA_ROOT, one array task per scene.
-# MASK_METHOD=rembg|threshold. See "mask.sbatch" in README.md.
+# MASK_METHOD=rembg|threshold|sam3. See "mask.sbatch" in README.md.
 #SBATCH --job-name=mask
 #SBATCH --partition=ice-gpu
 #SBATCH --nodes=1
@@ -26,8 +26,8 @@ source "$SLURM_DIR/common.sh"
 
 MASK_METHOD="${MASK_METHOD:-rembg}"
 case "$MASK_METHOD" in
-    rembg|threshold) ;;
-    *) echo "ERROR: unknown MASK_METHOD='$MASK_METHOD' (valid: rembg, threshold)" >&2; exit 2 ;;
+    rembg|threshold|sam3) ;;
+    *) echo "ERROR: unknown MASK_METHOD='$MASK_METHOD' (valid: rembg, threshold, sam3)" >&2; exit 2 ;;
 esac
 
 # A provider that is merely *advertised* is not a provider that loads: ORT lists
@@ -44,12 +44,21 @@ if "CUDAExecutionProvider" not in providers:
 PY
 fi
 
+if [ "$MASK_METHOD" = "sam3" ]; then
+    python - <<'PY'
+import torch
+if not torch.cuda.is_available():
+    raise SystemExit("ERROR: no CUDA device; SAM 3 masking would run on CPU")
+print("sam3 preflight: CUDA OK,", torch.cuda.get_device_name(0))
+PY
+fi
+
 discover_scenes
 select_scene
 
 # Masking reads images/ and writes its own scene, so unlike the SfM jobs it needs no masks/
 # in the input — it is the stage that produces them.
-#   nested (default) : <method>/<scene>/  — rembg and threshold coexist per scene
+#   nested (default) : <method>/<scene>/  — rembg, threshold and sam3 coexist per scene
 #   flat             : <scene>/                  — one method per scene; a second OVERWRITES
 OUT_LAYOUT="${OUT_LAYOUT:-nested}"
 case "$OUT_LAYOUT" in

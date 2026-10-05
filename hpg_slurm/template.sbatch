@@ -1,5 +1,6 @@
 #!/bin/bash
 # Copy this file, edit the command block at the bottom, then: sbatch hpg_slurm/<yours>.sbatch
+# NOTE: GPU=<name> picks the conda env and arch but NOT the partition; change both together.
 #SBATCH --job-name=augenblick
 #SBATCH --account=arthur.porto
 #SBATCH --partition=hpg-rtx6000
@@ -15,10 +16,10 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=srizvi63@gatech.edu
 
-# Abort on error here too: common.sh's own set -e is moot if sourcing fails.
+# Own set -e: common.sh's is moot if the source itself fails.
 set -euo pipefail
 
-# Slurm copies this script to /var/spool, so $0 cannot locate the repo; use the submit dir.
+# Slurm runs this from /var/spool, so $0 cannot find the repo; use the submit dir.
 SLURM_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/hpg_slurm"
 if [ ! -f "$SLURM_DIR/common.sh" ]; then
     echo "ERROR: cannot find common.sh at $SLURM_DIR; submit from the repo root" >&2
@@ -26,8 +27,10 @@ if [ ! -f "$SLURM_DIR/common.sh" ]; then
 fi
 source "$SLURM_DIR/common.sh"
 
-SCENE="data/CHANGE_ME"
-OUT="output/CHANGE_ME"
+# DATA_ROOT/RESULT_ROOT come from common.sh, as do discover_scenes/select_scene if you
+# turn this into an array job (see vggt_sfm.sbatch).
+SCENE="$DATA_ROOT/CHANGE_ME"
+OUT="$RESULT_ROOT/CHANGE_ME"
 
 # ================= EDIT BELOW: your command =================
 augenblick sfm vggt --scene "$SCENE" --output "$OUT"

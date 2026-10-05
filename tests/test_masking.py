@@ -1,7 +1,7 @@
 """Masking stage: the mask-writing contract, helpers, run loop, and CLI routing.
 
-CPU-only, no GPU, no model download — rembg and cv2.grabCut are never run on real data,
-so the suite stays seconds-long on a login node.
+CPU-only, no GPU, no model download — rembg, cv2.grabCut and SAM 3 are never run on real
+data, so the suite stays seconds-long on a login node.
 """
 import numpy as np
 import pytest
@@ -16,13 +16,14 @@ from augenblick.masking.base import (
     postprocess_mask,
     write_mask,
 )
+from augenblick.masking.sam3 import Sam3Config, Sam3Mask
 from augenblick.masking.threshold import ThresholdConfig, ThresholdMask, _decide_polarity
 
 import augenblick.masking  # noqa: F401  (fires registration)
 
 
-def test_registry_holds_both_methods():
-    assert set(MASK_REGISTRY) == {"rembg", "threshold"}
+def test_registry_holds_every_method():
+    assert set(MASK_REGISTRY) == {"rembg", "sam3", "threshold"}
 
 
 def test_write_mask_round_trips_through_consumer_reader(tmp_path):
@@ -194,3 +195,73 @@ def test_parser_rejects_mask_with_scene():
     with pytest.raises(SystemExit):
         build_parser().parse_args(
             ["mask", "threshold", "--images", "x", "--scene", "x", "--output", "y"])
+
+
+SAM3_SIZE = (6, 8)  # (height, width)
+
+
+class _FakeProcessor:
+    """Stands in for Sam3Processor: returns fixed detections, so no checkpoint is needed."""
+
+    def __init__(self, masks, scores):
+        self._masks, self._scores = masks, scores
+
+    def set_image(self, image):
+        return {}
+
+    def set_text_prompt(self, prompt, state):
+        return {**state, "masks": self._masks, "scores": self._scores}
+
+
+def _rect(top, left):
+    """A 2x2 foreground block, so two of them can be placed disjointly."""
+    m = np.zeros(SAM3_SIZE, dtype=bool)
+    m[top:top + 2, left:left + 2] = True
+    return m
+
+
+def _stub_sam3(torch, masks, scores, **config):
+    """A Sam3Mask whose processor is already built, bypassing the GPU and the download."""
+    method = Sam3Mask(Sam3Config(device="cpu", **config))
+    # Upstream hands back bool [N, 1, H, W]; the method flattens that itself.
+    method._processor = _FakeProcessor(
+        torch.from_numpy(np.stack(masks)[:, None]), torch.tensor(scores))
+    return method
+
+
+def _sam3_image(tmp_path):
+    path = tmp_path / "img.jpg"
+    Image.new("RGB", SAM3_SIZE[::-1], (10, 10, 10)).save(path)
+    return path
+
+
+def test_sam3_unions_every_surviving_detection(tmp_path):
+    """A specimen split across detections must come back whole, not as the top-scoring one."""
+    torch = pytest.importorskip("torch")
+    left, right = _rect(1, 1), _rect(4, 5)
+
+    mask = _stub_sam3(torch, [left, right], [0.9, 0.8]).mask_for(_sam3_image(tmp_path))
+
+    assert (mask == (left | right)).all()
+
+
+def test_sam3_max_detections_keeps_the_highest_scoring(tmp_path):
+    """The cutoff ranks by score, not by the order the detector returned them."""
+    torch = pytest.importorskip("torch")
+    weak, strong = _rect(1, 1), _rect(4, 5)
+
+    method = _stub_sam3(torch, [weak, strong], [0.4, 0.9], max_detections=1)
+    mask = method.mask_for(_sam3_image(tmp_path))
+
+    assert (mask == strong).all()
+
+
+def test_sam3_raises_when_nothing_matches(tmp_path):
+    """An empty result names the prompt and threshold instead of failing on a reshape."""
+    torch = pytest.importorskip("torch")
+    method = Sam3Mask(Sam3Config(device="cpu", prompt="vertebra"))
+    method._processor = _FakeProcessor(
+        torch.zeros((0, 1, *SAM3_SIZE), dtype=torch.bool), torch.zeros(0))
+
+    with pytest.raises(SceneError, match="vertebra"):
+        method.mask_for(_sam3_image(tmp_path))

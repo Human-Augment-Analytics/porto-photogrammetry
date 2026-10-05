@@ -115,8 +115,8 @@ def read_points3D_text(path):
                 xyz = np.array(tuple(map(float, elems[1:4])))
                 rgb = np.array(tuple(map(int, elems[4:7])))
                 error = np.array(float(elems[7]))
-                if error > 2.0:
-                    continue
+                # LOCAL PATCH (augenblick): upstream dropped points with error > 2.0 here.
+                # Removed to match the binary reader below; see the note there.
                 xyzs[count] = xyz
                 rgbs[count] = rgb
                 errors[count] = error
@@ -152,8 +152,11 @@ def read_points3D_binary(path_to_model_file):
             track_elems = read_next_bytes(
                 fid, num_bytes=8*track_length,
                 format_char_sequence="ii"*track_length)
-            if error > 2.0 or track_length < 3:
-                continue
+
+            # LOCAL PATCH (augenblick): upstream dropped points with error > 2.0 or
+            # track_length < 3 here. VGGT's depth-derived points carry no multi-view tracks,
+            # so every one was dropped and training crashed on zero Gaussians.
+
             xyzs[count] = xyz
             rgbs[count] = rgb
             errors[count] = error

@@ -2,27 +2,26 @@
 
 ## Documentation layout rule
 
-`.claude/CLAUDE.md` stays **succinct**: orientation, entry points, hard-won gotchas that change
-what you type, and pointers into `.claude/MEMORY/`. Anything long — full flag lists, per-backend
-internals, parameter tables, algorithm walk-throughs — lives in a topic file under
-`.claude/MEMORY/` and is linked from CLAUDE.md's index table.
+`.claude/CLAUDE.md` stays **succinct**: orientation, entry points, gotchas that change what you
+type, and pointers into `.claude/MEMORY/`. Anything long — flag lists, backend internals,
+parameter tables, algorithm walk-throughs — lives in a `MEMORY/` topic file, linked from
+CLAUDE.md's index.
 
-When adding documentation: put the detail in the right `MEMORY/` file (or add a new one and
-index it in CLAUDE.md); add to CLAUDE.md itself only if it changes how someone invokes or
-navigates the repo.
+When documenting: put the detail in the right `MEMORY/` file (or add one and index it); add to
+CLAUDE.md only if it changes how someone invokes or navigates the repo.
 
 ## `.claude/PLANS/`
 
 Implementation specs for large refactors, committed once the work lands. They record the
-constraints, the verification steps, and the reasoning behind a change — the things a diff does
-not preserve. `MEMORY/` describes the tree as it *is*; `PLANS/` describes how it got that way.
+constraints, verification steps and reasoning behind a change — what a diff does not preserve.
+`MEMORY/` describes the tree as it *is*; `PLANS/` how it got that way.
 
 - **Plans are historical, not authoritative.** Where a plan contradicts the code, the code wins.
   A landed plan is not updated to track later drift; the matching `MEMORY/` file is.
-- Commit a plan when its work lands, in the same commit or right after. A plan for work that was
-  abandoned does not get committed.
-- Paths inside a committed plan will go stale as the tree moves. That is expected and is not a
-  reason to rewrite it — the file is a record of a decision made at a point in time.
+- Commit a plan when its work lands, in that commit or right after. Abandoned work's plan is
+  not committed.
+- Paths inside a committed plan go stale as the tree moves. That is expected, not a reason to
+  rewrite it: the file records a decision made at a point in time.
 
 Landed: `augenblick-package-architecture.md` (the `src/augenblick` package and CLI),
 `move-backends-to-src-libs.md` (relocating third-party backends under `src/libs/`),
