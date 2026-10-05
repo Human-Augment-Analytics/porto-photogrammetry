@@ -28,6 +28,8 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [pipeline-masking.md](MEMORY/pipeline-masking.md) | The `mask` stage: contract, `rembg`/`threshold`/`sam3` methods, `--images` input, why it exists |
 | [pipeline-sfm.md](MEMORY/pipeline-sfm.md) | Data prep + all four SfM entry points with full flags (incl. turntable algorithm) |
 | [pipeline-reconstruction.md](MEMORY/pipeline-reconstruction.md) | The four reconstruction wrappers, their flags, and output paths |
+| [pipeline-evaluation.md](MEMORY/pipeline-evaluation.md) | The `eval` package: split, masked NVS metrics, mesh scoring, registration modes |
+| [pipeline-scale.md](MEMORY/pipeline-scale.md) | Metric scale from printed scale bars: inputs, windows, acceptance gates |
 | [scene-format.md](MEMORY/scene-format.md) | COLMAP scene layout, mask naming, end-to-end data flow |
 | [backend-vggt.md](MEMORY/backend-vggt.md) | VGGT architecture, utils, COLMAP conversion, coordinate conventions |
 | [backend-sugar.md](MEMORY/backend-sugar.md) | SuGaR four-stage pipeline, extraction, components |
@@ -57,6 +59,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 | SfM | `augenblick sfm {vggt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
 | Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
+| Evaluation | `python -m augenblick.eval.{nvs,mesh,scale}` — not on the `augenblick` CLI |
 
 Everything between the stages is a COLMAP scene: `images/` + optional `masks/` + `sparse/0/`.
 
@@ -93,6 +96,14 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 - Per-backend quirks (GW's no-`cwd` + passthrough, PGSR's `sparse/0/` flattening, SuGaR's
   `--flag True` string booleans) are now class properties — see
   [augenblick-package.md](MEMORY/augenblick-package.md).
+- Evaluation is **not** on the `augenblick` CLI: the stage subparsers come from the registries,
+  so scoring runs as `python -m augenblick.eval.{nvs,mesh,scale}`. `recon --eval` holds views
+  out and scores them inline; `sugar` has no `--eval`. See pipeline-evaluation.md.
+- `eval.mesh --rigid` on an unscaled COLMAP mesh scores **F = 0.000** at every tolerance — the
+  gauge is ~0.15-0.20x a millimetre reference. Recover scale first (pipeline-scale.md) or drop
+  `--rigid` and make no metric-scale claim.
+- `python -m augenblick.eval.scale` exits 0 **only** when the scale passes its acceptance gates,
+  and writes no metric mesh otherwise.
 - COLMAP IDs are 1-indexed — `+1` offset from VGGT batch indices.
 - numpy/scipy/scikit-* versions live in `constraints/numpy{1,2}.txt`, not `requirements.txt`.
   The generation must match the GPU's torch wheel, or imports break at runtime, not install.
