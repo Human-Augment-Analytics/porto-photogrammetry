@@ -1,4 +1,5 @@
 """SuGaR: a nested vanilla-3DGS training run followed by SuGaR coarse/mesh/refine/texture."""
+import json
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -7,17 +8,18 @@ from typing import ClassVar, Literal, Optional
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, EvalParams, Stage, SubprocessBackend
 
 logger = logging.getLogger(__name__)
 
 SUGAR_DIR = LIBS_DIR / "sugar"
 GS_TRAIN_SCRIPT = SUGAR_DIR / "gaussian_splatting" / "train.py"
 SUGAR_TRAIN_SCRIPT = SUGAR_DIR / "train.py"
+SUGAR_RENDER_SCRIPT = SUGAR_DIR / "render_refined.py"
 
 
 @dataclass(frozen=True)
-class SugarConfig:
+class SugarConfig(EvalParams):
     """Vanilla-3DGS and SuGaR parameters."""
 
     gs_iterations: int = field(default=20_000, metadata={"help": "Vanilla 3DGS training iterations"})
@@ -82,6 +84,8 @@ class SugarBackend(SubprocessBackend):
             "--lambda_dssim", str(c.gs_lambda_dssim),
             "--sh_degree", str(c.gs_sh_degree),
         ]
+        if c.eval:
+            gs_cmd.append("--eval")
 
         sugar_cmd = [
             sys.executable, str(SUGAR_TRAIN_SCRIPT),
@@ -95,7 +99,7 @@ class SugarBackend(SubprocessBackend):
             "-g", str(c.gaussians_per_triangle),
             "-f", str(c.refinement_iterations),
             "--square_size", str(c.square_size),
-            "--eval", "False",
+            "--eval", str(c.eval),
             "--gpu", str(c.gpu),
         ]
         if c.postprocess_mesh:
@@ -109,10 +113,60 @@ class SugarBackend(SubprocessBackend):
         if c.white_background:
             sugar_cmd += ["--white_background", "True"]
 
-        return [
+        stages = [
             Stage("3DGS training", gs_cmd),
             Stage("SuGaR training", sugar_cmd),
         ]
+        if c.eval:
+            render_cmd = [
+                sys.executable, str(SUGAR_RENDER_SCRIPT),
+                "--scene", str(scene_dir),
+                "--manifest", str(sugar_output_dir / "run_manifest.json"),
+                "--output", str(output_dir),
+                "--gpu", str(c.gpu),
+            ]
+            if c.white_background:
+                render_cmd.append("--white_background")
+            stages.append(Stage("Held-out splat + mesh rendering", render_cmd))
+        return stages
+
+    def test_renders_root(self, output_dir: Path) -> Path:
+        """SuGaR's primary held-out renders are the refined splat; evaluate() scores the mesh too."""
+        return output_dir / "test_splat"
+
+    def evaluate(self, scene: Scene, output_dir: Path) -> dict:
+        """Score refined splat and textured-mesh renders separately."""
+        from augenblick.eval.nvs import find_test_dir, resolve_test_stems, score
+
+        test_stems = resolve_test_stems(scene)
+        common = {"backend": self.name, "scene": str(scene.root), "model": str(output_dir)}
+        splat = score(
+            find_test_dir(output_dir / "test_splat"),
+            scene.masks_dir,
+            test_stems,
+            output_dir / "nvs_metrics_splat.json",
+            extra={**common, "target": "refined_splat"},
+        )
+        mesh = score(
+            find_test_dir(output_dir / "test_mesh"),
+            scene.masks_dir,
+            test_stems,
+            output_dir / "nvs_metrics_mesh.json",
+            extra={**common, "target": "textured_mesh"},
+        )
+        combined = {
+            **common,
+            "primary_target": "refined_splat",
+            "psnr": splat["psnr"],
+            "ssim": splat["ssim"],
+            "lpips": splat["lpips"],
+            "n_test": splat["n_test"],
+            "refined_splat": splat,
+            "textured_mesh": mesh,
+        }
+        with (output_dir / "nvs_metrics.json").open("w") as handle:
+            json.dump(combined, handle, indent=2)
+        return combined
 
     def mesh_path(self, output_dir: Path) -> Path:
         """Refined-mesh directory; upstream names it after the scene dir, not the output dir."""
