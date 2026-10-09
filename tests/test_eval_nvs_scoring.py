@@ -23,6 +23,9 @@ def _shared_lpips(monkeypatch):
     if not hasattr(_shared_lpips, "instance"):
         _shared_lpips.instance = metrics.Lpips()
     monkeypatch.setattr(nvs.metrics, "Lpips", lambda *a, **k: _shared_lpips.instance)
+    if not hasattr(_shared_lpips, "dists_instance"):
+        _shared_lpips.dists_instance = metrics.Dists()
+    monkeypatch.setattr(nvs.metrics, "Dists", lambda *a, **k: _shared_lpips.dists_instance)
 
 
 def _mask_array():
@@ -67,7 +70,7 @@ def test_scores_do_not_depend_on_the_photograph_background(tmp_path):
     grey = _score(tmp_path / "grey", 128)
     black = _score(tmp_path / "black", 0)
 
-    for metric in ("psnr", "ssim", "lpips"):
+    for metric in ("psnr", "ssim", "lpips", "dists"):
         assert grey[metric] == pytest.approx(bright[metric], abs=1e-5), metric
         assert black[metric] == pytest.approx(bright[metric], abs=1e-5), metric
 
@@ -86,6 +89,7 @@ def test_the_metric_domain_is_recorded(tmp_path):
     written = json.loads((tmp_path / "nvs_metrics.json").read_text())
     assert written["metric_domain"] == "mask"
     assert written["n_masked"] == len(STEMS)
+    assert written["dists"] == pytest.approx(np.mean([view["dists"] for view in written["views"]]))
 
 
 def test_an_empty_mask_is_skipped_rather_than_scored(tmp_path):
@@ -123,4 +127,5 @@ def test_identical_renders_and_photographs_score_perfectly(tmp_path):
     result = nvs.score(test_dir, masks_dir, STEMS, tmp_path / "metrics.json")
     assert result["ssim"] == pytest.approx(1.0, abs=1e-4)
     assert result["lpips"] == pytest.approx(0.0, abs=1e-4)
+    assert result["dists"] == pytest.approx(0.0, abs=1e-4)
     assert result["psnr"] > 100

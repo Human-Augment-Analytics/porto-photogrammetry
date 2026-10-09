@@ -19,6 +19,7 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | Method | Description |
 |--------|-------------|
 | COLMAP | Classical incremental SfM with SIFT features and bundle adjustment |
+| GLOMAP | Global SfM via PyCOLMAP, reusing COLMAP's masked SIFT extraction and matching |
 | VGGT | Feed-forward transformer that regresses camera parameters and a point map in a single pass |
 | VGGT + BA | VGGT output refined by VGGSfM tracking and bundle adjustment |
 | Turntable | Refines an existing SfM scene with an exact turntable rig prior (fixed axis, constant step) |
@@ -148,9 +149,9 @@ augenblick/
 │   ├── augenblick/            # The pipeline package (provides the `augenblick` CLI)
 │   │   ├── core/              #   Scene, config↔argparse bridge, registry, process, timing
 │   │   ├── masking/           #   rembg, threshold, sam3
-│   │   ├── sfm/               #   vggt, colmap, turntable, hull
+│   │   ├── sfm/               #   vggt, colmap, glomap, turntable, hull
 │   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw
-│   │   ├── eval/              #   Held-out split, masked PSNR/SSIM/LPIPS scorer
+│   │   ├── eval/              #   Held-out split, masked PSNR/SSIM/LPIPS/DISTS scorer
 │   │   └── cli/               #   Argument parsing and exit codes
 │   ├── libs/                  # Third-party backends (vendored + submodules)
 │   │   ├── vggt/              # VGGT model (Meta)
@@ -288,6 +289,12 @@ augenblick sfm colmap \
     --scene /path/to/scene/ \
     --output /output/colmap_masked/
 
+# Global SfM using the same masked extraction and exhaustive matching
+augenblick sfm glomap \
+    --scene /path/to/scene/ \
+    --output /output/glomap_masked/ \
+    --max_image_size 2400
+
 # Turntable rig refinement (object on a turntable, static cameras)
 # Takes an existing COLMAP scene and re-solves poses on exact circular orbits.
 augenblick sfm turntable \
@@ -303,6 +310,11 @@ augenblick sfm hull \
     --scene /output/colmap_masked/ \
     --output /output/hull/
 ```
+
+GLOMAP requires PyCOLMAP's `global_mapping` API (available in the pinned 4.1.1 package).
+An unsupported build raises `GLOMAP_UNAVAILABLE` before extraction. Both COLMAP and GLOMAP
+respect the process CPU affinity for extraction, matching, and supported mapping thread options.
+Both write the largest reconstruction to `sparse/0` for the same downstream backends.
 
 ### Step 2: Surface Reconstruction
 
@@ -329,6 +341,9 @@ augenblick recon 2dgs --scene <sfm> --output /output/2dgs/
 augenblick recon 2dgs --scene <sfm> --output /output/2dgs_eval/ \
     --eval -r 2 --skip_train_export
 ```
+
+2DGS training reports composite zero-mask pixels onto the configured rendering background
+before reporting L1 and PSNR; unmasked views and nonzero mask pixels are unchanged.
 
 #### PGSR
 
@@ -358,10 +373,15 @@ augenblick recon pgsr --scene <sfm> --output /output/pgsr_eval/ --eval -r 2
 augenblick recon gw   --scene <sfm> --output /output/gw_eval/   --eval -r 2
 ```
 
-Each run writes `<output>/nvs_metrics.json` holding masked PSNR, SSIM and LPIPS averaged over
+Each run writes `<output>/nvs_metrics.json` holding masked PSNR, SSIM, LPIPS and DISTS averaged over
 the held-out views, plus a per-view breakdown. Both the render and the photograph are masked to
 the specimen before scoring, because these are masked turntable captures where scoring the
 background would mostly reward reproducing the black surround.
+
+DISTS requires `dists-pytorch` (included in `requirements.txt`), accepts RGB values in `[0, 1]`,
+and uses the same tight specimen bounding-box crop as LPIPS. Lower is better. The `dists`
+field is written both per view and as the mean of scoreable views; GPU memory exhaustion
+falls back to CPU. Existing PSNR, SSIM, LPIPS, and `metric_domain` definitions are unchanged.
 
 The held-out set is fixed by `<scene>/split.json`, which the first `--eval` run writes by
 holding out every 8th registered image. Every backend reads that file in preference to its own

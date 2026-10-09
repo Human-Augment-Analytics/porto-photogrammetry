@@ -290,6 +290,10 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                     render_pkg = renderFunc(viewpoint, scene.gaussians, *renderArgs)
                     image = torch.clamp(render_pkg["render"], 0.0, 1.0).to("cuda")
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+                    if viewpoint.gt_alpha_mask is not None:
+                        gt_alpha = viewpoint.gt_alpha_mask.to(gt_image.device)
+                        background = renderArgs[1].to(gt_image.device).view(3, 1, 1)
+                        gt_image = torch.where(gt_alpha == 0, background, gt_image)
                     if tb_writer and (idx < 5):
                         from utils.general_utils import colormap
                         depth = render_pkg["surf_depth"]

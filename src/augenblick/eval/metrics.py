@@ -1,4 +1,4 @@
-"""PSNR, SSIM and LPIPS, matching the definitions the 3DGS-derived backends already use.
+"""PSNR, SSIM, LPIPS, and DISTS for shared held-out evaluation.
 
 The formulas are reproduced here rather than imported so that scoring does not depend on any
 one backend's vendored copy. They are deliberately identical to 2DGS's utils.image_utils.psnr
@@ -120,3 +120,35 @@ class Lpips:
             except torch.cuda.OutOfMemoryError:
                 torch.cuda.empty_cache()
         return float(self._cpu_model()(a.cpu(), b.cpu()).item())
+
+
+class Dists:
+    """DISTS scorer for paired RGB images, with the same specimen crop as LPIPS."""
+
+    def __init__(self):
+        from DISTS_pytorch import DISTS
+
+        self._model_type = DISTS
+        self._gpu = DISTS().cuda() if torch.cuda.is_available() else None
+        self._cpu = None
+
+    def _cpu_model(self):
+        if self._cpu is None:
+            logger.info("DISTS falling back to CPU for this view")
+            self._cpu = self._model_type()
+        return self._cpu
+
+    @torch.no_grad()
+    def __call__(self, pred: torch.Tensor, truth: torch.Tensor,
+                 mask: torch.Tensor | None = None) -> float:
+        """Score a [3, H, W] pair in [0, 1]; lower DISTS means greater similarity."""
+        if mask is not None:
+            top, bottom, left, right = mask_bbox(mask)
+            pred, truth = pred[:, top:bottom, left:right], truth[:, top:bottom, left:right]
+        first, second = pred.unsqueeze(0), truth.unsqueeze(0)
+        if self._gpu is not None:
+            try:
+                return float(self._gpu(first.cuda(), second.cuda()).item())
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+        return float(self._cpu_model()(first.cpu(), second.cpu()).item())
