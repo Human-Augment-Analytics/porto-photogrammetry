@@ -18,6 +18,7 @@ Usage (run from the repo root so this file's dir is on sys.path):
       --mesh <method-mesh.ply|obj> --output <model-dir>
 """
 import argparse
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 import torchvision
+from PIL import Image
 from pytorch3d.io import load_objs_as_meshes, save_obj
 from pytorch3d.ops import interpolate_face_attributes
 from pytorch3d.renderer import TexturesUV, TexturesVertex
@@ -39,7 +41,13 @@ sys.path.insert(0, str(REPO_SRC))
 from sugar_scene.gs_model import GaussianSplattingWrapper
 from sugar_utils.mesh_rasterization import MeshRasterizer
 # These helpers are pure (no SuGaR-model state), so they are safe to reuse for any mesh.
-from sugar_extractors.texture import _accumulate_samples, _load_photo_camera
+from sugar_extractors.texture import (
+    _accumulate_camera_support,
+    _accumulate_samples,
+    _coverage_summary,
+    _load_photo_camera,
+    _uv_texel_mask,
+)
 
 
 def _output_dirs(output_path, target, iteration):
@@ -55,6 +63,19 @@ def _save_rgb(image, path):
     if image.ndim == 3 and image.shape[-1] in (3, 4):
         image = image[..., :3].permute(2, 0, 1)
     torchvision.utils.save_image(image[:3].clamp(0, 1), path)
+
+
+def _save_bake_diagnostics(directory, valid_uv, camera_support, summary):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    valid_map = valid_uv.flip(0).to(torch.uint8).cpu().numpy() * 255
+    coverage_map = ((camera_support > 0) & valid_uv).flip(0).to(torch.uint8).cpu().numpy() * 255
+    support_map = camera_support.flip(0).to(torch.int32).cpu().numpy()
+    Image.fromarray(valid_map).save(directory / "valid_uv.png")
+    Image.fromarray(coverage_map).save(directory / "coverage.png")
+    Image.fromarray(support_map.astype(np.uint16)).save(directory / "view_support.png")
+    with (directory / "coverage_summary.json").open("w") as handle:
+        json.dump(summary, handle, indent=2)
 
 
 def load_method_mesh(mesh_path, device):
@@ -140,7 +161,8 @@ def _render_uv(rasterizer, mesh, camera_index, background, device):
 
 @torch.no_grad()
 def bake_photo_texture(surface_mesh, training_cameras, source_path, device,
-                       square_size=10, photo_max_size=-1):
+                       square_size=10, photo_max_size=-1, diagnostics_dir=None,
+                       sampling_mode="nearest"):
     """Bake a UV texture onto surface_mesh by projecting full-res training photos.
 
     This is SuGaR's square-packed per-triangle atlas bake (sugar_extractors.texture), lifted
@@ -188,6 +210,7 @@ def bake_photo_texture(surface_mesh, training_cameras, source_path, device,
 
     texture_img = torch.zeros(texture_size, texture_size, 3, device=device)
     texture_count = torch.zeros(texture_size, texture_size, 1, device=device)
+    camera_support = torch.zeros((texture_size, texture_size), dtype=torch.int32, device=device)
     face_colors = torch.zeros(n_triangles, 3, device=device)
     face_count = torch.zeros(n_triangles, 1, device=device)
 
@@ -211,9 +234,23 @@ def bake_photo_texture(surface_mesh, training_cameras, source_path, device,
         pixel_idx_0 = ((verts_uv[faces_uv[face_indices]] * bary_coords[:, :, None]).sum(dim=1)
                        * texture_size).int()
         pixel_idx_0.clamp_(0, texture_size - 1)
+        _accumulate_camera_support(camera_support, pixel_idx_0)
         _accumulate_samples(face_colors, face_count, texture_img, texture_count,
                             face_indices, pixel_idx_0, colors)
         del fragments, bary_coords, pix_to_face, colors, rgb_img, render_camera
+
+    if diagnostics_dir is not None:
+        valid_uv = _uv_texel_mask(verts_uv, faces_uv, texture_size)
+        summary = {
+            "atlas_width": texture_size,
+            "atlas_height": texture_size,
+            "square_size": square_size,
+            "photo_max_size": photo_max_size,
+            "sampling_mode": sampling_mode,
+            "camera_count": len(training_cameras),
+            **_coverage_summary(valid_uv, camera_support),
+        }
+        _save_bake_diagnostics(diagnostics_dir, valid_uv, camera_support, summary)
 
     filled_mask = texture_count[..., 0] > 0
     texture_img[filled_mask] = texture_img[filled_mask] / texture_count[filled_mask]
@@ -231,7 +268,7 @@ def bake_photo_texture(surface_mesh, training_cameras, source_path, device,
         maps=texture_img[None].float(),
         verts_uvs=verts_uv[None],
         faces_uvs=faces_uv[None],
-        sampling_mode="nearest",
+        sampling_mode=sampling_mode,
     )
     return Meshes(
         verts=[surface_mesh.verts_list()[0]],
@@ -243,7 +280,10 @@ def bake_photo_texture(surface_mesh, training_cameras, source_path, device,
 @torch.no_grad()
 def run(scene_path, vanilla_checkpoint, iteration_to_load, mesh_path, output_path,
         gpu=0, white_background=False, iteration=0, square_size=10, photo_max_size=-1,
-        skip_native=False, skip_bake=False, save_baked_obj=True, score=True):
+        skip_native=False, skip_bake=False, save_baked_obj=True, score=True,
+        sampling_mode="nearest"):
+    if sampling_mode not in ("nearest", "bilinear"):
+        raise ValueError("sampling_mode must be 'nearest' or 'bilinear'")
     torch.cuda.set_device(gpu)
     device = f"cuda:{gpu}"
     background = [1.0, 1.0, 1.0] if white_background else [0.0, 0.0, 0.0]
@@ -281,9 +321,11 @@ def run(scene_path, vanilla_checkpoint, iteration_to_load, mesh_path, output_pat
                     "nvs_metrics_mesh_native.json", mesh_path, native_kind)
 
     if not skip_bake:
+        diagnostics_dir = Path(output_path) / "photobake"
         textured = bake_photo_texture(
             mesh, nerfmodel.training_cameras, scene_path, device,
-            square_size=square_size, photo_max_size=photo_max_size)
+            square_size=square_size, photo_max_size=photo_max_size,
+            diagnostics_dir=diagnostics_dir, sampling_mode=sampling_mode)
         if save_baked_obj:
             obj_path = Path(output_path) / "photobake" / "photofull_mesh.obj"
             obj_path.parent.mkdir(parents=True, exist_ok=True)
@@ -309,12 +351,14 @@ def run(scene_path, vanilla_checkpoint, iteration_to_load, mesh_path, output_pat
         if score:
             metrics_written["photofull"] = _score(
                 scene_path, output_path, "test_mesh_photofull", iteration,
-                "nvs_metrics_mesh_photofull.json", mesh_path, native_kind)
+                "nvs_metrics_mesh_photofull.json", mesh_path, native_kind,
+                sampling_mode=sampling_mode)
 
     return metrics_written
 
 
-def _score(scene_path, output_path, target, iteration, out_name, mesh_path, native_kind):
+def _score(scene_path, output_path, target, iteration, out_name, mesh_path, native_kind,
+           sampling_mode=None):
     """Score one render set against the held-out photos with the shared NVS protocol."""
     from augenblick.core.scene import Scene
     from augenblick.eval.nvs import find_test_dir, resolve_test_stems
@@ -333,6 +377,7 @@ def _score(scene_path, output_path, target, iteration, out_name, mesh_path, nati
             "native_texture": native_kind,
             "scene": str(scene.root),
             "model": str(output_path),
+            **({"sampling_mode": sampling_mode} if sampling_mode is not None else {}),
         },
     )
     print(f"{target}: psnr={result['psnr']:.4f} ssim={result['ssim']:.4f} "
@@ -355,6 +400,8 @@ def main():
     parser.add_argument("--square-size", type=int, default=10)
     parser.add_argument("--photo-max-size", type=int, default=-1,
                         help="Cap the long side of source photos; -1 keeps full resolution")
+    parser.add_argument("--sampling-mode", choices=("nearest", "bilinear"), default="nearest",
+                        help="UV atlas sampling mode used when rendering the photo-baked mesh")
     parser.add_argument("--skip-native", action="store_true")
     parser.add_argument("--skip-bake", action="store_true")
     parser.add_argument("--no-save-obj", action="store_true")
@@ -376,6 +423,7 @@ def main():
         skip_bake=args.skip_bake,
         save_baked_obj=not args.no_save_obj,
         score=not args.no_score,
+        sampling_mode=args.sampling_mode,
     )
 
 
