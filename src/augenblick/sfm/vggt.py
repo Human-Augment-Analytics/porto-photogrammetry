@@ -38,12 +38,12 @@ class VGGTConfig:
                 "silhouette seam detectors fire on (0 disables)"})
     seed: int = field(default=42, metadata={"help": "Random seed for reproducibility"})
     use_ba: bool = field(default=False, metadata={"help": "Use BA for reconstruction"})
-    max_reproj_error: float = field(default=8.0, metadata={
+    max_reproj_error: float = field(default=32.0, metadata={
         "help": "Maximum reprojection error for reconstruction"})
-    min_inlier_per_frame: int = field(default=64, metadata={
+    min_inlier_per_frame: int = field(default=16, metadata={
         "help": "Surviving tracks a frame needs to take part in BA; frames below it are "
                 "dropped individually rather than aborting the reconstruction"})
-    min_valid_frames: float = field(default=0.3, metadata={
+    min_valid_frames: float = field(default=0.6, metadata={
         "help": "Fraction of frames that must clear --min_inlier_per_frame, or BA is skipped "
                 "entirely"})
     shared_camera: bool = field(default=False, metadata={
@@ -51,7 +51,7 @@ class VGGTConfig:
     camera_type: str = field(default="SIMPLE_PINHOLE", metadata={
         "help": "Camera type for reconstruction"})
     vis_thresh: float = field(default=0.2, metadata={"help": "Visibility threshold for tracks"})
-    query_frame_num: int = field(default=12, metadata={"help": "Number of frames to query"})
+    query_frame_num: int = field(default=24, metadata={"help": "Number of frames to query"})
     max_query_pts: int = field(default=4096, metadata={
         "help": "Maximum number of query points. The BA inlier floor counts surviving tracks "
                 "per frame absolutely, so masked scenes need a large budget to clear it"})

@@ -22,9 +22,9 @@ augenblick sfm vggt \
     [--conf_perc_thresh 25.0]    \  # depth-confidence percentile floor, both modes
     [--use_ba]                   \  # VGGSfM tracker + pycolmap BA
     [--shared_camera] [--camera_type SIMPLE_PINHOLE] \
-    [--max_reproj_error 8.0] [--vis_thresh 0.2] \
-    [--min_inlier_per_frame 64] [--min_valid_frames 0.3] \  # BA inlier floors
-    [--query_frame_num 12] [--max_query_pts 4096] [--fine_tracking]
+    [--max_reproj_error 32.0] [--vis_thresh 0.2] \
+    [--min_inlier_per_frame 16] [--min_valid_frames 0.6] \  # BA inlier floors
+    [--query_frame_num 24] [--max_query_pts 4096] [--fine_tracking]
 ```
 
 Runs VGGT inference, writes `sparse/0/`, exports `points.ply`, and **symlinks** `images/` (plus
