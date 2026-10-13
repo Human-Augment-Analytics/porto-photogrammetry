@@ -1,6 +1,5 @@
-"""PGSR: planar Gaussians trained on a flattened copy of the scene, then TSDF meshing."""
+"""PGSR: planar Gaussians trained on a flattened, linked view of the scene, then TSDF meshing."""
 import logging
-import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,14 +61,14 @@ class PgsrBackend(SubprocessBackend):
     title: ClassVar[str] = "PGSR Reconstruction Pipeline"
 
     def prepare(self, scene: Scene, output_dir: Path) -> Scene:
-        """Copy the scene and flatten sparse/0/ into sparse/, as PGSR reads sparse/ directly.
+        """Link the scene and flatten sparse/0/ into sparse/, as PGSR reads sparse/ directly.
 
         Args:
             scene: The input COLMAP scene.
-            output_dir: Directory the prepared copy is written under.
+            output_dir: Directory the prepared scene is written under.
 
         Returns:
-            A Scene pointing at the prepared copy.
+            A Scene pointing at the prepared scene.
         """
         scene_dir = scene.root
         pgsr_scene = output_dir / "scene"
@@ -81,23 +80,25 @@ class PgsrBackend(SubprocessBackend):
             copy_split(scene_dir, pgsr_scene)
             return Scene(pgsr_scene)
 
-        logger.info(f"Copying scene from {scene_dir} to {pgsr_scene}")
-        for subdir in ["images", "masks", "sparse"]:
+        logger.info(f"Linking scene from {scene_dir} into {pgsr_scene}")
+        pgsr_scene.mkdir(parents=True)
+        for subdir in ["images", "masks"]:
             src = scene_dir / subdir
             if src.is_dir():
-                shutil.copytree(src, pgsr_scene / subdir)
+                (pgsr_scene / subdir).symlink_to(src.resolve(), target_is_directory=True)
         # PGSR reads split.json from the copy, so the held-out set has to travel with it.
         copy_split(scene_dir, pgsr_scene)
 
-        sparse_0 = pgsr_scene / "sparse" / "0"
+        sparse_0 = scene_dir / "sparse" / "0"
         sparse = pgsr_scene / "sparse"
         if sparse_0.is_dir():
-            logger.info("Flattening sparse/0/ -> sparse/")
+            logger.info("Flattening sparse/0/ -> sparse/ as links")
+            sparse.mkdir()
             for item in sparse_0.iterdir():
-                shutil.move(str(item), str(sparse / item.name))
-            sparse_0.rmdir()
+                (sparse / item.name).symlink_to(item.resolve())
         else:
             logger.info("No sparse/0/ found; assuming sparse/ is already flat")
+            sparse.symlink_to((scene_dir / "sparse").resolve(), target_is_directory=True)
 
         return Scene(pgsr_scene)
 
