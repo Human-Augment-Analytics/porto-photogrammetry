@@ -85,6 +85,22 @@ def test_sugar_argv_uses_string_booleans():
     assert backend.mesh_path(OUT) == OUT / "sugar" / "refined_mesh" / "scene"
 
 
+def test_sugar_eval_reaches_both_training_stages():
+    backend = SugarBackend(SugarConfig(eval=True))
+    gs, sugar, render = backend.stages(SCENE, OUT)
+    assert "--eval" in gs.cmd
+    eval_index = sugar.cmd.index("--eval")
+    assert sugar.cmd[eval_index + 1] == "True"
+    assert render.cmd == [
+        sys.executable, str(LIBS_DIR / "sugar" / "render_refined.py"),
+        "--scene", "/scene",
+        "--manifest", "/out/sugar/run_manifest.json",
+        "--output", "/out",
+        "--gpu", "0",
+    ]
+    assert backend.eval_enabled is True
+
+
 def test_pgsr_argv_render_has_no_scene_flag():
     backend = PgsrBackend(PgsrConfig(skip_mesh=True))
     train, render = backend.stages(Scene(Path("/out/scene")), OUT)
@@ -270,7 +286,7 @@ def test_gw_keeps_exposure_compensation_when_not_evaluating():
 def test_eval_enabled_tracks_the_config_field():
     assert TwoDGSBackend(TwoDGSConfig(eval=True)).eval_enabled is True
     assert TwoDGSBackend(TwoDGSConfig()).eval_enabled is False
-    # SuGaR declares no eval field, so it can never be asked for held-out metrics.
+    assert SugarBackend(SugarConfig(eval=True)).eval_enabled is True
     assert SugarBackend(SugarConfig()).eval_enabled is False
 
 
