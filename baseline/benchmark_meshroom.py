@@ -8,10 +8,11 @@ optional save file capturing the pipeline graph.
 
 Usage:
     python baseline/benchmark_meshroom.py <input_images> <output_dir> \
-        [--pipeline photogrammetry] [--save_file <path>] \
+        [--pipeline {photogrammetry,turntable}] [--save_file <path>] \
         [--meshroom_root <path>]
 """
 import argparse
+import json
 import logging
 import os
 import shutil
@@ -27,6 +28,13 @@ logger = logging.getLogger(__name__)
 # Texturing.py): the mesh, its material, and the texture atlases. Everything else in
 # MeshroomCache is intermediate.
 TEXTURED_MESH_GLOBS = ("texturedMesh.*", "texture_*")
+
+PIPELINES = {
+    "photogrammetry": "photogrammetry",
+    "turntable": "photogrammetryObjectTurntable",
+}
+
+SEGMENTATION_NODES = ("ImageDetectionPrompt_1", "ImageSegmentationBox_1")
 
 
 def run(cmd, cwd=None, env=None):
@@ -91,6 +99,44 @@ def prune_cache(output_dir):
     logger.info(f"Pruned MeshroomCache, freed {freed / 2**30:.1f} GiB")
 
 
+def find_template(name):
+    """Locate <name>.mg on MESHROOM_PIPELINE_TEMPLATES_PATH, where meshroom_batch looks."""
+    for folder in os.environ.get("MESHROOM_PIPELINE_TEMPLATES_PATH", "").split(os.pathsep):
+        path = Path(folder) / f"{name}.mg"
+        if folder and path.is_file():
+            return path
+    logger.error(f"{name}.mg not found on MESHROOM_PIPELINE_TEMPLATES_PATH")
+    sys.exit(1)
+
+
+def write_turntable_graph(dest):
+    """Write the turntable template to dest without its segmentation nodes.
+
+    FeatureExtraction reads CameraInit directly and both mask inputs are left at
+    their defaults, for the masks/ overrides in main() to fill. What remains
+    turntable-specific is FeatureMatching.minRequired2DMotion, which drops matches
+    on the static background.
+    """
+    with open(find_template(PIPELINES["turntable"])) as f:
+        template = json.load(f)
+    graph = template["graph"]
+    for name in SEGMENTATION_NODES:
+        del graph[name]
+        template["header"]["nodesVersions"].pop(name.rsplit("_", 1)[0], None)
+
+    graph["FeatureExtraction_1"]["inputs"]["input"] = "{CameraInit_1.output}"
+    graph["FeatureExtraction_1"]["inputs"].pop("masksFolder")
+    graph["PrepareDenseScene_1"]["inputs"].pop("masksFolders")
+
+    dangling = [n for n in SEGMENTATION_NODES if f"{{{n}." in json.dumps(graph)]
+    if dangling:
+        raise RuntimeError(f"turntable template still references {dangling}")
+
+    with open(dest, "w") as f:
+        json.dump(template, f, indent=4)
+    return dest
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run the Meshroom batch photogrammetry pipeline.",
@@ -103,6 +149,13 @@ def main():
         type=Path,
         default=None,
         help="Path to MESHROOM_ROOT (defaults to $MESHROOM_ROOT env var)",
+    )
+    parser.add_argument(
+        "--pipeline",
+        choices=sorted(PIPELINES),
+        default="photogrammetry",
+        help="AliceVision template: 'photogrammetry' (standard) or 'turntable' "
+             "(photogrammetryObjectTurntable, which filters static-background matches)",
     )
 
     parser.add_argument("--describer_preset", default="normal", help="FeatureExtraction.describerPreset")
@@ -157,7 +210,10 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pipeline = "photogrammetry"
+    if args.pipeline == "turntable":
+        pipeline = str(write_turntable_graph(output_dir / "turntable_template.mg"))
+    else:
+        pipeline = PIPELINES[args.pipeline]
 
     logger.info("=" * 60)
     logger.info("Meshroom Baseline Pipeline")
@@ -184,7 +240,10 @@ def main():
         f"Texturing:colorMapping.colorMappingFileType=png",
     ]
     if os.path.exists(mask_images):
-        param_overrides.append(f"FeatureExtraction:masksFolder={mask_images}")
+        param_overrides += [
+            f"FeatureExtraction:masksFolder={mask_images}",
+            f"PrepareDenseScene:masksFolders={[mask_images]!r}",
+        ]
 
     cmd = [
         sys.executable, str(meshroom_batch),
