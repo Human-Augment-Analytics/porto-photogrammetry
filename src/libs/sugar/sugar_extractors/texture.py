@@ -1,13 +1,19 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import torch
 from pathlib import Path
 from PIL import Image
-from sugar_scene.sugar_model import SuGaR
 from sugar_scene.cameras import GSCamera
 from sugar_utils.spherical_harmonics import SH2RGB
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesUV
-from sugar_utils.mesh_rasterization import MeshRasterizer, RasterizationSettings
+from sugar_utils.mesh_rasterization import MeshRasterizer
+
+if TYPE_CHECKING:
+    from sugar_scene.sugar_model import SuGaR
 
 
 def _find_source_image(source_path, image_name):
@@ -22,7 +28,9 @@ def _find_source_image(source_path, image_name):
 
 def _load_photo_camera(source_path, camera, max_image_size, device):
     """Load one source photograph and clone its camera at the photograph's resolution."""
-    image_path = _find_source_image(source_path, camera.image_name)
+    image_path = getattr(camera, "image_path", None)
+    if image_path is None:
+        image_path = _find_source_image(source_path, camera.image_name)
     with Image.open(image_path) as source:
         source = source.convert("RGB")
         width, height = source.size
@@ -69,45 +77,17 @@ def _accumulate_samples(face_colors, face_count, texture_img, texture_count,
     texture_count.view(-1, 1).index_add_(0, flat_pixels, ones)
 
 
-@torch.no_grad()
-def compute_textured_mesh_for_sugar_mesh(
-    sugar:SuGaR,
-    square_size:int=10,
-    n_sh=0,
-    texture_with_gaussian_renders=True,
-    bg_color=[0., 0., 0.],
-):  
-    device = sugar.device
-    
-    if sugar.nerfmodel is None:
-        raise ValueError("You must provide a NerfModel to use this function.")
-
-    if square_size < 3:
-        raise ValueError("square_size must be >= 3")
-
-    surface_mesh = sugar.surface_mesh
-    faces = surface_mesh.faces_packed()
-
-    n_triangles = len(faces)
+def build_square_atlas(n_triangles, square_size, device):
+    """Build the shared native/photo atlas with nondegenerate inset triangles."""
+    if square_size < 5:
+        raise ValueError("square_size must be >= 5")
+    if n_triangles < 1:
+        raise ValueError("the atlas requires at least one triangle")
     n_squares = n_triangles // 2 + 1
     n_square_per_axis = int(np.sqrt(n_squares) + 1)
     texture_size = square_size * (n_square_per_axis)
 
-    # Build faces UV.
-    # Each face will have 3 corresponding vertices in the UV map
-    faces_uv = torch.arange(3 * n_triangles, device=device).view(n_triangles, 3)  # n_triangles, 3
-
-    # Build corresponding vertices UV
-    vertices_uv = torch.cartesian_prod(
-        torch.arange(n_square_per_axis, device=device), 
-        torch.arange(n_square_per_axis, device=device))
-    bottom_verts_uv = torch.cat(
-        [vertices_uv[n_square_per_axis:-1, None], vertices_uv[:-n_square_per_axis-1, None], vertices_uv[n_square_per_axis+1:, None]],
-        dim=1)
-    top_verts_uv = torch.cat(
-        [vertices_uv[1:-n_square_per_axis, None], vertices_uv[:-n_square_per_axis-1, None], vertices_uv[n_square_per_axis+1:, None]],
-        dim=1)
-
+    faces_uv = torch.arange(3 * n_triangles, device=device).view(n_triangles, 3)
     vertices_uv = torch.cartesian_prod(
         torch.arange(n_square_per_axis, device=device), 
         torch.arange(n_square_per_axis, device=device))[:, None]
@@ -129,10 +109,7 @@ def compute_textured_mesh_for_sugar_mesh(
     verts_uv[:, 4] = verts_uv[:, 4] + torch.tensor([[1, 3]], device=device)
     verts_uv[:, 5] = verts_uv[:, 5] + torch.tensor([[-3, -1]], device=device)
     
-    verts_uv = verts_uv.reshape(-1, 2) / texture_size
-    print("Building UV map done.")
-    
-    # Get, for each pixel, the corresponding face
+    verts_uv = verts_uv.reshape(-1, 2)[:3 * n_triangles] / texture_size
     uvs_coords = torch.cartesian_prod(
         torch.arange(texture_size, device=device, dtype=torch.int32), 
         torch.arange(texture_size, device=device, dtype=torch.int32),
@@ -146,6 +123,29 @@ def compute_textured_mesh_for_sugar_mesh(
 
     uv_to_faces = 2 * square_of_uvs + uvs_in_top_triangle
     uv_to_faces = uv_to_faces.transpose(0, 1).clamp_max(n_triangles - 1)
+    return faces_uv, verts_uv, uv_to_faces, texture_size
+
+
+@torch.no_grad()
+def compute_textured_mesh_for_sugar_mesh(
+    sugar:SuGaR,
+    square_size:int=10,
+    n_sh=0,
+    texture_with_gaussian_renders=True,
+    bg_color=[0., 0., 0.],
+):
+    if square_size < 5:
+        raise ValueError("square_size must be >= 5")
+    device = sugar.device
+
+    if sugar.nerfmodel is None:
+        raise ValueError("You must provide a NerfModel to use this function.")
+
+    surface_mesh = sugar.surface_mesh
+    n_triangles = len(surface_mesh.faces_packed())
+    faces_uv, verts_uv, uv_to_faces, texture_size = build_square_atlas(
+        n_triangles, square_size, device)
+    print(f"Native texture atlas: square_size={square_size}, texture_size={texture_size}, sampling=nearest")
     
     # Build Texture
     texture_img = torch.zeros(texture_size, texture_size, 3, device=device)
@@ -159,18 +159,14 @@ def compute_textured_mesh_for_sugar_mesh(
     non_visited_face_colors = SH2RGB(sugar._sh_coordinates_dc[:, 0]).clamp(0., 1.).view(n_triangles, -1, 3)
     non_visited_face_colors = non_visited_face_colors.mean(dim=1)
     
-    # Build rasterizer
-    height = sugar.nerfmodel.training_cameras.gs_cameras[0].image_height
-    width = sugar.nerfmodel.training_cameras.gs_cameras[0].image_width
-    raster_settings = RasterizationSettings(image_size=(height, width))
-    rasterizer = MeshRasterizer(
-        cameras=sugar.nerfmodel.training_cameras,
-        raster_settings=raster_settings,
-        use_nvdiffrast=True,
-    )
+    rasterizer = None
     
     print(f"Processing images...")
     for cam_idx in range(len(sugar.nerfmodel.training_cameras)):
+        render_camera = sugar.nerfmodel.training_cameras.gs_cameras[cam_idx]
+        height, width = render_camera.image_height, render_camera.image_width
+        if rasterizer is None or (rasterizer.height, rasterizer.width) != (height, width):
+            rasterizer = MeshRasterizer(cameras=render_camera, use_nvdiffrast=True)
         if texture_with_gaussian_renders:
             rgb_img = sugar.render_image_gaussian_rasterizer(
                 nerf_cameras=sugar.nerfmodel.training_cameras,
@@ -182,7 +178,7 @@ def compute_textured_mesh_for_sugar_mesh(
             rgb_img = rgb_img.view(1, height, width, 3)
         else:
             raise NotImplementedError("Should use GT RGB image if texture_with_gaussian_renders is False.")
-        fragments = rasterizer(sugar.surface_mesh, cam_idx=cam_idx)
+        fragments = rasterizer(sugar.surface_mesh, cameras=render_camera, cam_idx=0)
         bary_coords = fragments.bary_coords.view(1, height, width, 3)
         pix_to_face = fragments.pix_to_face.view(1, height, width)
 
@@ -190,13 +186,10 @@ def compute_textured_mesh_for_sugar_mesh(
         face_indices = pix_to_face[mask]
         bary_coords = bary_coords[mask]
         colors = rgb_img[mask]
-        
-        face_count[face_indices] = face_count[face_indices] + 1 
-        face_colors[face_indices] = face_colors[face_indices] + colors
 
         pixel_idx_0 = ((verts_uv[faces_uv[face_indices]] * bary_coords[:, :, None]).sum(dim=1) * texture_size).int()
-        texture_img[pixel_idx_0[:, 1], pixel_idx_0[:, 0]] = texture_img[pixel_idx_0[:, 1], pixel_idx_0[:, 0]] + colors
-        texture_count[pixel_idx_0[:, 1], pixel_idx_0[:, 0]] = texture_count[pixel_idx_0[:, 1], pixel_idx_0[:, 0]] + 1
+        _accumulate_samples(face_colors, face_count, texture_img, texture_count,
+                    face_indices, pixel_idx_0, colors)
         
     # For visited UV points, we just average the colors from the rendered images
     filled_mask = texture_count[..., 0] > 0

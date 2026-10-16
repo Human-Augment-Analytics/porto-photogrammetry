@@ -6,7 +6,7 @@
 #   <OUTPUT>/nvs_metrics_mesh_photofull.json
 # Cameras come from the shared COLMAP scene, so the split matches the NVS eval for every method.
 #
-# Usage (defaults target the SuGaR vanilla checkpoint as the shared camera provider):
+# Usage (cameras come directly from SCENE/sparse/0; no checkpoint is required):
 #   SCENE=output/UF_Fish_245298/all/colmap \
 #   MESH=output/UF_Fish_245298/all/colmap-2dgs/train/ours_30000/fuse_post.ply \
 #   OUTPUT=output/UF_Fish_245298/all/colmap-2dgs \
@@ -37,19 +37,17 @@ source "$SLURM_DIR/common.sh"
 : "${MESH:?set MESH to the backend's extracted mesh (.obj or .ply)}"
 : "${OUTPUT:?set OUTPUT to the backend's model directory}"
 
-# The vanilla 3DGS checkpoint is only a camera provider; all backends share this scene/split,
-# so the SuGaR vanilla model is a convenient default source of the held-out cameras.
-VANILLA_CHECKPOINT="${VANILLA_CHECKPOINT:-output/UF_Fish_245298/all/colmap-sugar/gs_model}"
-ITERATION_TO_LOAD="${ITERATION_TO_LOAD:-7000}"
+RESOLUTION="${RESOLUTION:--1}"
+ITERATION="${ITERATION:-0}"
 PHOTO_MAX_SIZE="${PHOTO_MAX_SIZE:--1}"
 SQUARE_SIZE="${SQUARE_SIZE:-10}"
 
 PYTHONPATH=src python src/libs/sugar/photobake_mesh.py \
     --scene "$SCENE" \
-    --vanilla-checkpoint "$VANILLA_CHECKPOINT" \
-    --iteration-to-load "$ITERATION_TO_LOAD" \
     --mesh "$MESH" \
     --output "$OUTPUT" \
+    --resolution "$RESOLUTION" \
+    --iteration "$ITERATION" \
     --square-size "$SQUARE_SIZE" \
     --photo-max-size "$PHOTO_MAX_SIZE"
 
