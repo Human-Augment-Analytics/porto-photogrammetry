@@ -216,8 +216,22 @@ def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
     missing = [code for code in bars.codes() if code not in tracks]
     if missing:
         raise ValueError(f"No observations for target codes {missing}")
+    # A ring shorter than one window would wrap onto itself: the window would hold
+    # repeated views and the holdout would overlap the training set, which voids the
+    # one guarantee the protocol rests on. Such rings are recorded and skipped.
+    skipped_rings = [{"ring": i, "images": len(ring),
+                      "error": f"shorter than one {gates.window_size}-view window"}
+                     for i, ring in enumerate(rings) if len(ring) < gates.window_size]
+    usable = [(i, ring) for i, ring in enumerate(rings)
+              if len(ring) >= gates.window_size]
+    note = None
+    if len(usable) < gates.min_distinct_rings:
+        note = (f"only {len(usable)} usable ring(s); acceptance requires windows from "
+                f"at least {gates.min_distinct_rings} distinct rings, so this input "
+                "cannot produce an accepted scale")
+        logger.warning(note)
     windows = []
-    for ring_index, ring in enumerate(rings):
+    for ring_index, ring in usable:
         for offset in range(0, len(ring), gates.stride):
             names = [ring[(offset + i) % len(ring)] for i in range(gates.window_size)]
             window = {"ring": ring_index, "offset": offset,
@@ -239,9 +253,12 @@ def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
         "predeclared": asdict(gates) | {"primary": list(bars.primary),
                                         "check": list(bars.check)},
         "windows": windows,
+        "skipped_rings": skipped_rings,
         "acceptance_checks": checks,
         "accepted": False,
     }
+    if note:
+        result["note"] = note
     if not passing:
         return result
     primary = np.array([w["primary_length_units"] for w in passing])
@@ -428,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"REJECTED  windows {checks['passing_windows']}/{len(result['windows'])}  "
               f"checks {json.dumps(checks)}")
+        if result.get("note"):
+            print(f"NOTE  {result['note']}")
 
     if args.apply_to:
         if not result["accepted"]:

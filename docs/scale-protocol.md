@@ -17,6 +17,15 @@ photographed alongside the specimen and refuses to hand over a number it cannot 
   candidate. The detector is out of scope; any decoder of circular coded targets works.
 - The four target codes forming the two bars, split into a primary and a check pair.
 
+The scene directory may carry a `capture_manifest.json`: a list of
+`{"image": <path or name>, "position": <label>}` entries assigning each photograph to a
+turntable position. When present, ring grouping keys on (camera body, lens, focal length,
+position); without it, on the camera hardware alone. A capture whose images resolve to
+fewer usable rings than the two the acceptance gate requires is reported as such up front:
+its windows are still evaluated for diagnostics, but it cannot produce an accepted scale.
+Rings shorter than one window are recorded and skipped, because a wrapped window would
+hold repeated views and the holdout would overlap the training set.
+
 Two conventions matter at the input boundary. OpenCV puts the first pixel centre at
 (0, 0) and COLMAP at (0.5, 0.5); the module adds the half pixel itself. And the detector's
 canonical code for a bit pattern does not equal the label printed on the bar; the mapping
