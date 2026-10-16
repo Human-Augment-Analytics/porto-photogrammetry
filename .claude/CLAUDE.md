@@ -27,13 +27,14 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [data-morphosource.md](MEMORY/data-morphosource.md) | MorphoSource downloader: flags, project 000381689 contents, API gotchas |
 | [pipeline-masking.md](MEMORY/pipeline-masking.md) | The `mask` stage: contract, `rembg`/`threshold`/`sam3` methods, `--images` input, why it exists |
 | [pipeline-sfm.md](MEMORY/pipeline-sfm.md) | Data prep + all four SfM entry points with full flags (incl. turntable algorithm) |
-| [pipeline-reconstruction.md](MEMORY/pipeline-reconstruction.md) | The four reconstruction wrappers, their flags, and output paths |
+| [pipeline-reconstruction.md](MEMORY/pipeline-reconstruction.md) | The five reconstruction wrappers, their flags, and output paths |
 | [scene-format.md](MEMORY/scene-format.md) | COLMAP scene layout, mask naming, end-to-end data flow |
 | [backend-vggt.md](MEMORY/backend-vggt.md) | VGGT architecture, utils, COLMAP conversion, coordinate conventions |
 | [backend-sugar.md](MEMORY/backend-sugar.md) | SuGaR four-stage pipeline, extraction, components |
 | [backend-2dgs.md](MEMORY/backend-2dgs.md) | 2DGS surfels, losses, TSDF/marching-cubes extraction |
 | [backend-pgsr.md](MEMORY/backend-pgsr.md) | PGSR planar Gaussians, multi-view losses, TSDF meshing |
 | [backend-gaussian-wrapping.md](MEMORY/backend-gaussian-wrapping.md) | GW three stages, components, CUDA submodule matrix |
+| [backend-geosvr.md](MEMORY/backend-geosvr.md) | GeoSVR sparse voxels, yacs CLI fixes, outputs, vendoring + local patches |
 | [baseline-meshroom.md](MEMORY/baseline-meshroom.md) | Meshroom wrapper + reference runtimes |
 | [repo-conventions.md](MEMORY/repo-conventions.md) | Doc rule, repo layout, legacy code, ID/naming and commit conventions |
 | [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts for HiPerGator + PACE ICE, partitions/accounts, GPU switch, timing CSV, batch-env gotchas |
@@ -55,7 +56,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 | Data preparation | `pipeline/preparation/prepare_uf_dataset.py` |
 | Masking | `augenblick mask {rembg,threshold,sam3}` — produces `masks/` from a flat images folder |
 | SfM | `augenblick sfm {vggt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
-| Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw}` |
+| Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw,geosvr}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
 
 Everything between the stages is a COLMAP scene: `images/` + optional `masks/` + `sparse/0/`.
@@ -99,7 +100,7 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 - `download_morphosource_project.py` defaults to a **seeded 3-specimen sample** (~3.2 GB), not
   the whole 869 GB project; `--dry-run` costs nothing and needs no API key.
 - All third-party backends live under `src/libs/` (`2dgs`, `pgsr`, `sugar`,
-  `gaussian_wrapping`, `vggt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
+  `gaussian_wrapping`, `geosvr`, `vggt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
   `src/augenblick/` (the package), `pipeline/preparation/`, and `src/utils/`.
 - `src/libs/sam3` is a **trimmed** vendored copy (image-masking path only) with marked
   `LOCAL PATCH (augenblick)` edits — never sync it wholesale from upstream, and do not delete

@@ -34,9 +34,13 @@ compute capability.
 
 ### `setup_common.sh` knobs
 
-- `BACKENDS` (default `"sugar 2dgs pgsr gw"`) — subset of CUDA rasterizers to build.
+- `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr"`) — subset of CUDA rasterizers to build.
 - `SKIP_TETRA=1` — skip the fragile CGAL `tetra_triangulation` build (GW pivot extraction only).
 - `PYTORCH3D_WHEEL=<url>` — install a prebuilt pytorch3d instead of the source build.
+
+### GeoSVR dependencies: keep `transformers` aligned with the hub pin
+
+`yacs`, `natsort`, `pytorch-msssim`, `imageio-ffmpeg` and `transformers==5.17.0` are `requirements.txt` entries for GeoSVR (`lpips` was already pinned). `imageio-ffmpeg` is never imported by name: imageio loads it to write `train.py`'s `.mp4` test-report video, and without it falls back to a TIFF writer that crashes on `fps` *after* training finishes. **`transformers` must stay compatible with `huggingface_hub==1.28.0`**, which SAM3 and DVLT load weights through. An unpinned `transformers` resolves 5.19.0 and silently upgrades the hub to 2.2.0. 4.x is no fallback either: 4.49 needs `huggingface_hub < 1.0`.
 
 ### Masking dependencies live in `requirements.txt`
 

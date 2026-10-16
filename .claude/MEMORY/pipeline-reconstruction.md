@@ -1,6 +1,6 @@
 # Reconstruction Backends (`augenblick recon`)
 
-Four backends, each taking `--scene` and `--output`, orchestrating the underlying `src/libs/`
+Five backends, each taking `--scene` and `--output`, orchestrating the underlying `src/libs/`
 train + render scripts via `subprocess.run()` with a banner + per-stage + total-time summary.
 They are `SubprocessBackend` subclasses; the class machinery is documented in
 [augenblick-package.md](augenblick-package.md).
@@ -37,11 +37,20 @@ augenblick recon gw --scene <scene_dir> --output <output_dir> \
     [--use_searched_pivots] [--use_smallest_axis_as_normal] \
     [--no-postprocess] [--no-filter_large_edges] \
     [--texture_n_iter 1000] [--texture_lambda_dssim] [--texture_lr 0.0025] [--texture_sh_degree]
+
+# GeoSVR: sparse-voxel training (yacs preset + flags) → render → TSDF mesh
+augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
+    [--preset dtu|tnt|none] [--sche_mult 1.0] [--lambda_depthanythingv2 0.1] \
+    [--no-da2_uncertainty] [--multi_view_ncc_weight 0.05] [--multi_view_geo_weight 0.01] \
+    [--lambda_rectify 1e-5] [--lambda_scaling_penalty 5e-7] [--lambda_mask 0.1] \
+    [--white_background] [--tsdf auto|fixed] [--radius_scale 2.0] \
+    [--voxel_size 0.002] [--max_depth 5.0] [--sdf_trunc_scale 2.0] \
+    [--num_cluster 1] [--use_depth_filter] [-r -1] [--eval]
 ```
 
 ## Wrapper-specific behaviour
 
-- **SuGaR / 2DGS / PGSR** set `cwd` to the backend source dir (`use_cwd = True`).
+- **SuGaR / 2DGS / PGSR / GeoSVR** set `cwd` to the backend source dir (`use_cwd = True`).
 - **PGSR** copies the scene and flattens `sparse/0/` → `sparse/` in its `prepare()` hook
   (PGSR expects no `0/`); the copy is reused if it already exists.
 - **GW is the exception** (`use_cwd = False`): it invokes `train.py`,
@@ -51,6 +60,7 @@ augenblick recon gw --scene <scene_dir> --output <output_dir> \
   forwarded **only to the training step** (gated on `accepts_passthrough`). Boolean toggles use
   `argparse.BooleanOptionalAction`, hence the `--no-postprocess` / `--no-filter_large_edges`
   spellings (both default on).
+- **GeoSVR** reads the scene in place (no `prepare()`) and writes nothing outside the output dir. It loads a yacs preset (`cfg/dtu_mesh.yaml`), then overrides it with explicit flags, every bool as `--x`/`--no-x`; vendored patches make flags reliably beat the preset. `--lambda_mask` (default 0.1) requires a mask for every image, checked in `validate()`. Held-out renders land in `test/ours_<iter>_r<res_downscale>/`, which `find_test_dir` accepts.
 
 ## Output locations
 
@@ -59,7 +69,9 @@ augenblick recon gw --scene <scene_dir> --output <output_dir> \
 | SuGaR | textured mesh `.obj` + `.ply` | `<output>/refined_mesh/<scene>/` |
 | 2DGS | triangle mesh | `<model>/train/ours_<iter>/fuse_post.ply` |
 | PGSR | triangle mesh | `<model>/mesh/tsdf_fusion_post.ply` |
+| GeoSVR | triangle mesh | `<model>/mesh/tsdf/tsdf_fusion_post.ply` |
 | GW | raw / post / textured mesh | `<output>/mesh_ours_2pivots{,_post,_post_texture_refined_<iter-1>}.ply` |
 
 Per-backend internals: [backend-sugar.md](backend-sugar.md), [backend-2dgs.md](backend-2dgs.md),
-[backend-pgsr.md](backend-pgsr.md), [backend-gaussian-wrapping.md](backend-gaussian-wrapping.md).
+[backend-pgsr.md](backend-pgsr.md), [backend-gaussian-wrapping.md](backend-gaussian-wrapping.md),
+[backend-geosvr.md](backend-geosvr.md).

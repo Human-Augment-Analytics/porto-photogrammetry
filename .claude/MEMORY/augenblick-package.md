@@ -42,7 +42,7 @@ augenblick recon --list
 
 `sfm`/`recon` take `--scene`; `mask` takes `--images` (a flat images folder — it produces a
 scene rather than consuming one). Methods: mask `rembg`, `threshold`; SfM `vggt`, `colmap`,
-`turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`.
+`turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`.
 
 The per-stage input flag comes from one `STAGES` table in `cli/main.py`
 (`stage -> (registry, getter, help, input_flag, input_help)`); adding a stage is one entry
@@ -64,7 +64,7 @@ Exit codes, which SLURM guards depend on:
 core/     errors, Scene, config bridge, registry, process.run, StageTimer, Method ABC + mixins
 masking/  base (MaskMethod, MaskResult, write/postprocess helpers) + rembg, threshold
 sfm/      base (SfMMethod, SceneRefiner) + vggt, colmap, turntable, hull
-reconstruction/  base (ReconstructionMethod, SubprocessBackend, Stage) + the four backends
+reconstruction/  base (ReconstructionMethod, SubprocessBackend, Stage) + the five backends
 cli/      main.py — the only place logging is configured
 ```
 
@@ -92,7 +92,7 @@ Stage ABCs:
   standalone SfM.
 - **`ReconstructionMethod(SceneInputMixin, Method[Scene])`** requires both `images/` and
   `sparse/0/`, adds `stages()` and `mesh_path()`. **`SubprocessBackend`** implements `run()`
-  once for all four backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
+  once for all five backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
 
 ### Registry
 
@@ -152,6 +152,7 @@ each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
   path, not the output dir.
 - **2DGS** always passes `--skip_test` on render; `mesh_path()` is
   `train/ours_<iterations>/fuse_post.ply`.
+- **GeoSVR** loads a yacs preset via `--cfg_files`, then overrides it with flags; vendored patches make a flag always beat the preset and let `True` bools be turned off. Other vendored patches give it the same `-s`/`-m` script interface as the other backends. It reads the scene in place (no `prepare()`) and keeps every intermediate under the output dir. Its `validate()` also requires a mask per image while `lambda_mask > 0`. See [backend-geosvr.md](backend-geosvr.md).
 
 Passthrough is gated on `accepts_passthrough` rather than applied globally, so a typo in any other
 backend is rejected instead of silently forwarded.

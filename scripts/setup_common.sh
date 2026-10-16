@@ -2,7 +2,7 @@
 # Shared installer behind the per-GPU wrappers (setup_l40s/a100/b200.sh, auto_setup.sh).
 # Wrappers must export: GPU_LABEL, GPU_ARCH, CUDA_MODULE, TORCH_SPEC, TORCH_INDEX_URL,
 # NUMPY_GENERATION (1 or 2, matching the torch wheel's numpy C-ABI).
-# Optional: BACKENDS (default "sugar 2dgs pgsr gw"), SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
+# Optional: BACKENDS (default "sugar 2dgs pgsr gw geosvr"), SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
 set -euo pipefail
 
 : "${GPU_LABEL:?set by wrapper}"
@@ -11,7 +11,7 @@ set -euo pipefail
 : "${TORCH_SPEC:?set by wrapper}"
 : "${TORCH_INDEX_URL:?set by wrapper}"
 : "${NUMPY_GENERATION:?set by wrapper}"
-BACKENDS="${BACKENDS:-sugar 2dgs pgsr gw}"
+BACKENDS="${BACKENDS:-sugar 2dgs pgsr gw geosvr}"
 SKIP_TETRA="${SKIP_TETRA:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,6 +108,9 @@ case " $BACKENDS " in *" 2dgs "*)
 esac
 case " $BACKENDS " in *" pgsr "*)
     build src/libs/pgsr/submodules/diff-plane-rasterization ;;
+esac
+case " $BACKENDS " in *" geosvr "*)
+    build src/libs/geosvr/cuda ;;
 esac
 case " $BACKENDS " in *" gw "*)
     build src/libs/gaussian_wrapping/submodules/diff-gaussian-rasterization-gw

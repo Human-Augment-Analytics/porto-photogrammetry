@@ -2,7 +2,7 @@
 import pytest
 
 from augenblick.core.errors import SceneError
-from augenblick.eval.nvs import find_test_dir, pair_views
+from augenblick.eval.nvs import find_test_dir, pair_views, render_iteration
 
 STEMS = ["camera1_IMG_0001", "camera1_IMG_0009", "camera2_IMG_0017"]
 
@@ -61,6 +61,19 @@ def test_find_test_dir_picks_the_highest_iteration(tmp_path):
         (tmp_path / f"ours_{iteration}").mkdir()
     assert find_test_dir(tmp_path) == tmp_path / "ours_30000"
     assert find_test_dir(tmp_path, 7000) == tmp_path / "ours_7000"
+
+
+def test_find_test_dir_accepts_resolution_suffix(tmp_path):
+    (tmp_path / "ours_7000").mkdir()
+    (tmp_path / "ours_20000_r2.0").mkdir()
+    (tmp_path / "ours_notes.txt").write_text("")
+    assert find_test_dir(tmp_path) == tmp_path / "ours_20000_r2.0"
+
+
+def test_render_iteration_ignores_suffixes():
+    assert render_iteration("ours_30000") == 30000
+    assert render_iteration("ours_2000_r3.9") == 2000
+    assert render_iteration("gt") is None
 
 
 def test_find_test_dir_without_renders_is_an_error(tmp_path):

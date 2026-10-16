@@ -2,7 +2,7 @@
 # Gaussian reconstruction, one array task per scene.
 # Usage: BACKEND=2dgs SFM=vggt sbatch hpg_slurm/recon.sbatch [extra flags]
 # One scene: sbatch --array=N ...   (N indexes the sorted scene list)
-# BACKEND=2dgs|sugar|pgsr|gw; SFM= picks the input SfM at <scene>/<SFM>/.
+# BACKEND=2dgs|sugar|pgsr|gw|geosvr; SFM= picks the input SfM at <scene>/<SFM>/.
 # 64gb is NOT enough for 2DGS TSDF at --mesh_res 4096 on ~660 images (peaked 97 GiB RSS,
 # oom_killed); raise --mem there - nodes carry 515-2063 gb, so headroom is free.
 #SBATCH --job-name=recon
@@ -33,8 +33,8 @@ source "$SLURM_DIR/common.sh"
 
 BACKEND="${BACKEND:-2dgs}"
 case "$BACKEND" in
-    2dgs|sugar|pgsr|gw) ;;
-    *) echo "ERROR: unknown BACKEND='$BACKEND' (valid: 2dgs, sugar, pgsr, gw)" >&2; exit 2 ;;
+    2dgs|sugar|pgsr|gw|geosvr) ;;
+    *) echo "ERROR: unknown BACKEND='$BACKEND' (valid: 2dgs, sugar, pgsr, gw, geosvr)" >&2; exit 2 ;;
 esac
 
 SFM="${SFM:-vggt}"

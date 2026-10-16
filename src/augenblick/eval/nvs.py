@@ -11,6 +11,7 @@ Usage:  python -m augenblick.eval.nvs --scene <scene> --output <model_dir>
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -31,17 +32,24 @@ METRICS_FILENAME = "nvs_metrics.json"
 METRIC_DOMAIN = "mask"
 
 
+def render_iteration(name: str) -> int | None:
+    """Iteration of an ours_<iter>[suffix] render dir; GeoSVR appends e.g. _r3.9."""
+    match = re.match(r"ours_(\d+)", name)
+    return int(match.group(1)) if match else None
+
+
 def find_test_dir(test_root: Path, iteration: int | None = None) -> Path:
     """Locate the held-out render directory a backend wrote under its test root."""
     if iteration is not None:
         return test_root / f"ours_{iteration}"
-    candidates = [p for p in test_root.glob("ours_*") if p.is_dir()]
+    candidates = {p: render_iteration(p.name) for p in test_root.glob("ours_*") if p.is_dir()}
+    candidates = {p: i for p, i in candidates.items() if i is not None}
     if not candidates:
         raise SceneError(
             f"no held-out renders under {test_root}; "
             "the backend was run without an evaluation split")
     # Highest iteration wins, so a 7k checkpoint never shadows the final one.
-    return max(candidates, key=lambda p: int(p.name.split("_")[-1]))
+    return max(candidates, key=candidates.get)
 
 
 def resolve_test_stems(scene: Scene) -> list[str]:
@@ -176,7 +184,7 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
     result = {
         **(extra or {}),
         "test_dir": str(test_dir),
-        "iteration": int(test_dir.name.split("_")[-1]) if "_" in test_dir.name else None,
+        "iteration": render_iteration(test_dir.name),
         "n_test": len(views),
         "n_masked": masked,
         "n_skipped": len(skipped),

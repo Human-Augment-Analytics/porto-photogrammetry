@@ -1,6 +1,6 @@
 #!/bin/bash
 # Gaussian reconstruction for every scene under DATA_ROOT, one array task per scene.
-# BACKEND selects the registered reconstruction backend (2dgs|sugar|pgsr|gw).
+# BACKEND selects the registered reconstruction backend (2dgs|sugar|pgsr|gw|geosvr).
 # SFM selects which SfM result feeds it: results/<scene>/<SFM>/.
 #SBATCH --job-name=recon
 #SBATCH --partition=ice-gpu
@@ -27,8 +27,8 @@ source "$SLURM_DIR/common.sh"
 
 BACKEND="${BACKEND:-2dgs}"
 case "$BACKEND" in
-    2dgs|sugar|pgsr|gw) ;;
-    *) echo "ERROR: unknown BACKEND='$BACKEND' (valid: 2dgs, sugar, pgsr, gw)" >&2; exit 2 ;;
+    2dgs|sugar|pgsr|gw|geosvr) ;;
+    *) echo "ERROR: unknown BACKEND='$BACKEND' (valid: 2dgs, sugar, pgsr, gw, geosvr)" >&2; exit 2 ;;
 esac
 
 SFM="${SFM:-vggt}"
