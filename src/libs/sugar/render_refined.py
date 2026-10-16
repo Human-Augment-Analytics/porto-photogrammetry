@@ -60,6 +60,7 @@ def render_held_out(scene_path, manifest_path, output_path, gpu, white_backgroun
         source_path=scene_path,
         output_path=manifest["vanilla_checkpoint_path"],
         iteration_to_load=manifest["iteration_to_load"],
+        resolution=manifest.get("resolution", -1),
         load_gt_images=True,
         eval_split=True,
         white_background=white_background,

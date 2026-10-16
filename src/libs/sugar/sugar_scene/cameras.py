@@ -10,19 +10,18 @@ from pytorch3d.renderer.cameras import _get_sfm_calibration_matrix
 
 from sugar_utils.graphics_utils import focal2fov, fov2focal, getWorld2View2, getProjectionMatrix
 from sugar_utils.general_utils import PILtoTorch
+from sugar_utils.camera_resolution import camera_resolution
 
 
-def load_gs_cameras(source_path, gs_output_path, image_resolution=1, 
-                    load_gt_images=True, max_img_size=1920, white_background=False,
-                    remove_indices=[]):
+def load_gs_cameras(source_path, gs_output_path, resolution=-1,
+                    load_gt_images=True, white_background=False, remove_indices=[]):
     """Loads Gaussian Splatting camera parameters from a COLMAP reconstruction.
 
     Args:
         source_path (str): Path to the source data.
         gs_output_path (str): Path to the Gaussian Splatting output.
-        image_resolution (int, optional): Factor by which to downscale the images. Defaults to 1.
+        resolution (int, optional): Vanilla 3DGS downscale or target width; -1 caps width at 1600.
         load_gt_images (bool, optional): If True, loads the ground truth images. Defaults to True.
-        max_img_size (int, optional): Maximum size of the images. Defaults to 1920.
         white_background (bool, optional): If True, uses a white background. Defaults to False.
         remove_indices (list, optional): List of indices to remove. Defaults to [].
 
@@ -107,22 +106,15 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
                 arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
                 image = Image.fromarray(np.array(arr*255.0, dtype=np.uint8), "RGB")
             orig_w, orig_h = image.size
-            downscale_factor = 1
-            if image_resolution in [1, 2, 4, 8]:
-                downscale_factor = image_resolution
-                # resolution = round(orig_w/(image_resolution)), round(orig_h/(image_resolution))
-            if max(orig_h, orig_w) > max_img_size:
-                additional_downscale_factor = max(orig_h, orig_w) / max_img_size
-                downscale_factor = additional_downscale_factor * downscale_factor
-            resolution = round(orig_w/(downscale_factor)), round(orig_h/(downscale_factor))
-            resized_image_rgb = PILtoTorch(image, resolution)
+            image_size = camera_resolution(orig_w, orig_h, resolution)
+            resized_image_rgb = PILtoTorch(image, image_size)
             gt_image = resized_image_rgb[:3, ...]
 
             # Load mask if available
             mask_path = os.path.join(masks_dir, name + ".png")
             if os.path.exists(mask_path):
-                mask = Image.open(mask_path).convert("L").resize(resolution)
-                loaded_mask = PILtoTorch(mask, resolution)
+                mask = Image.open(mask_path).convert("L").resize(image_size)
+                loaded_mask = PILtoTorch(mask, image_size)
             else:
                 loaded_mask = None
 
@@ -130,13 +122,7 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         else:
             gt_image = None
             loaded_mask = None
-            if image_resolution in [1, 2, 4, 8]:
-                downscale_factor = image_resolution
-                # resolution = round(orig_w/(image_resolution)), round(orig_h/(image_resolution))
-            if max(height, width) > max_img_size:
-                additional_downscale_factor = max(height, width) / max_img_size
-                downscale_factor = additional_downscale_factor * downscale_factor
-            image_height, image_width = round(height/downscale_factor), round(width/downscale_factor)
+            image_width, image_height = camera_resolution(width, height, resolution)
 
         gs_camera = GSCamera(
             colmap_id=id, image=gt_image, gt_alpha_mask=loaded_mask,

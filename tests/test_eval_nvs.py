@@ -66,3 +66,62 @@ def test_find_test_dir_picks_the_highest_iteration(tmp_path):
 def test_find_test_dir_without_renders_is_an_error(tmp_path):
     with pytest.raises(SceneError, match="no held-out renders"):
         find_test_dir(tmp_path)
+
+
+def test_score_output_discovers_both_sugar_products(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from augenblick.eval import nvs
+
+    for target in ("test_splat", "test_mesh"):
+        _make_test_dir(tmp_path / target, STEMS)
+        (tmp_path / target / "ours_7000").mkdir()
+    manifest = tmp_path / "sugar" / "run_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({"resolution": -1, "texture_square_size": 8}))
+    scene = SimpleNamespace(root=tmp_path / "scene", masks_dir=tmp_path / "masks")
+    monkeypatch.setattr(nvs, "resolve_test_stems", lambda scene: STEMS)
+    calls = []
+
+    def fake_score(test_dir, masks_dir, stems, out_path, extra):
+        calls.append((test_dir, stems, out_path, extra))
+        return {"psnr": 20, "ssim": 0.8, "lpips": 0.2, "n_test": 3}
+
+    monkeypatch.setattr(nvs, "score", fake_score)
+    result = nvs.score_output(scene, tmp_path, iteration=7000)
+    assert [call[0] for call in calls] == [
+        tmp_path / "test_splat" / "ours_7000",
+        tmp_path / "test_mesh" / "ours_7000",
+    ]
+    assert calls[1][3]["texture_square_size"] == 8
+    assert all(call[3]["resolution"] == -1 for call in calls)
+    assert result["primary_target"] == "refined_splat"
+    assert result["psnr"] == result["refined_splat"]["psnr"]
+    assert "textured_mesh" in json.loads((tmp_path / "nvs_metrics.json").read_text())
+
+
+def test_score_output_requires_both_sugar_products(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from augenblick.eval import nvs
+
+    (tmp_path / "test_mesh").mkdir()
+    monkeypatch.setattr(nvs, "resolve_test_stems", lambda scene: STEMS)
+    with pytest.raises(SceneError, match="no held-out renders"):
+        nvs.score_output(SimpleNamespace(root=tmp_path, masks_dir=tmp_path), tmp_path)
+
+
+def test_sugar_backend_uses_shared_scorer(tmp_path, monkeypatch):
+    from augenblick.eval import nvs
+    from augenblick.reconstruction.sugar import SugarBackend, SugarConfig
+
+    scene = object()
+    expected = {"primary_target": "refined_splat"}
+    calls = []
+
+    def fake_score(scene_arg, output_arg):
+        calls.append((scene_arg, output_arg))
+        return expected
+
+    monkeypatch.setattr(nvs, "score_sugar_output", fake_score)
+    assert SugarBackend(SugarConfig()).evaluate(scene, tmp_path) is expected
+    assert calls == [(scene, tmp_path)]

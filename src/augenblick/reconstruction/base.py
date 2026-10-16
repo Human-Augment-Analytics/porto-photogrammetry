@@ -31,10 +31,10 @@ class EvalParams:
 
 @dataclass(frozen=True)
 class ResolutionParams:
-    """Input downscale, for the backends that forward -r to their training script."""
+    """Input downscale or target width, forwarded to backend training scripts."""
 
     resolution: int = field(default=-1, metadata={
-        "short": "-r", "help": "Input downscale factor; -1 caps the long side at 1600 px"})
+        "short": "-r", "help": "Input downscale (1/2/4/8) or target width; -1 caps width at 1600 px"})
 
 
 @dataclass
