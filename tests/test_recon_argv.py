@@ -67,6 +67,7 @@ def test_sugar_argv_uses_string_booleans():
         "--densify_until_iter", "15000",
         "--lambda_dssim", "0.2",
         "--sh_degree", "3",
+        "--resolution", "-1",
     ]
     assert sugar.cmd == [
         sys.executable, str(LIBS_DIR / "sugar" / "train.py"),
@@ -77,9 +78,10 @@ def test_sugar_argv_uses_string_booleans():
         "-v", "1000000",
         "-g", "1",
         "-f", "15000",
-        "--square_size", "4",
+        "--square_size", "8",
         "--eval", "False",
         "--gpu", "0",
+        "--resolution", "-1",
         "--high_poly", "True",
     ]
     assert backend.mesh_path(OUT) == OUT / "sugar" / "refined_mesh" / "scene"

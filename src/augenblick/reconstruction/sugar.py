@@ -1,5 +1,4 @@
 """SuGaR: a nested vanilla-3DGS training run followed by SuGaR coarse/mesh/refine/texture."""
-import json
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -8,7 +7,7 @@ from typing import ClassVar, Literal, Optional
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, EvalParams, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ SUGAR_RENDER_SCRIPT = SUGAR_DIR / "render_refined.py"
 
 
 @dataclass(frozen=True)
-class SugarConfig(EvalParams):
+class SugarConfig(EvalParams, ResolutionParams):
     """Vanilla-3DGS and SuGaR parameters."""
 
     gs_iterations: int = field(default=20_000, metadata={"help": "Vanilla 3DGS training iterations"})
@@ -40,12 +39,16 @@ class SugarConfig(EvalParams):
     high_poly: bool = field(default=False, metadata={"help": "1M vertices, 1 gaussian/triangle"})
     refinement_time: Optional[Literal["short", "medium", "long"]] = field(
         default=None, metadata={"help": "Preset refinement duration (2k/7k/15k iterations)"})
-    square_size: int = field(default=4, metadata={
+    square_size: int = field(default=8, metadata={
         "help": "UV texture square size (larger → finer baked texture)"})
     postprocess_mesh: bool = field(default=False, metadata={
         "help": "Remove low-density border triangles (risky; can help single-sided objects)"})
     white_background: bool = field(default=False, metadata={"help": "Use white background"})
     gpu: int = field(default=0, metadata={"help": "GPU device index"})
+
+    def __post_init__(self):
+        if self.square_size < 5:
+            raise ValueError("square_size must be >= 5")
 
 
 @register_reconstruction
@@ -83,6 +86,7 @@ class SugarBackend(SubprocessBackend):
             "--densify_until_iter", str(c.gs_densify_until_iter),
             "--lambda_dssim", str(c.gs_lambda_dssim),
             "--sh_degree", str(c.gs_sh_degree),
+            "--resolution", str(c.resolution),
         ]
         if c.eval:
             gs_cmd.append("--eval")
@@ -101,6 +105,7 @@ class SugarBackend(SubprocessBackend):
             "--square_size", str(c.square_size),
             "--eval", str(c.eval),
             "--gpu", str(c.gpu),
+            "--resolution", str(c.resolution),
         ]
         if c.postprocess_mesh:
             sugar_cmd += ["--postprocess_mesh", "True"]
@@ -136,37 +141,9 @@ class SugarBackend(SubprocessBackend):
 
     def evaluate(self, scene: Scene, output_dir: Path) -> dict:
         """Score refined splat and textured-mesh renders separately."""
-        from augenblick.eval.nvs import find_test_dir, resolve_test_stems, score
+        from augenblick.eval.nvs import score_sugar_output
 
-        test_stems = resolve_test_stems(scene)
-        common = {"backend": self.name, "scene": str(scene.root), "model": str(output_dir)}
-        splat = score(
-            find_test_dir(output_dir / "test_splat"),
-            scene.masks_dir,
-            test_stems,
-            output_dir / "nvs_metrics_splat.json",
-            extra={**common, "target": "refined_splat"},
-        )
-        mesh = score(
-            find_test_dir(output_dir / "test_mesh"),
-            scene.masks_dir,
-            test_stems,
-            output_dir / "nvs_metrics_mesh.json",
-            extra={**common, "target": "textured_mesh"},
-        )
-        combined = {
-            **common,
-            "primary_target": "refined_splat",
-            "psnr": splat["psnr"],
-            "ssim": splat["ssim"],
-            "lpips": splat["lpips"],
-            "n_test": splat["n_test"],
-            "refined_splat": splat,
-            "textured_mesh": mesh,
-        }
-        with (output_dir / "nvs_metrics.json").open("w") as handle:
-            json.dump(combined, handle, indent=2)
-        return combined
+        return score_sugar_output(scene, output_dir)
 
     def mesh_path(self, output_dir: Path) -> Path:
         """Refined-mesh directory; upstream names it after the scene dir, not the output dir."""

@@ -30,6 +30,8 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--iteration_to_load', 
                         type=int, default=7000, 
                         help='iteration to load.')
+    parser.add_argument('--resolution', type=int, default=-1,
+                        help='Input downscale (1/2/4/8) or target width; -1 caps width at 1600.')
     
     # Regularization for coarse SuGaR
     parser.add_argument('-r', '--regularization_type', type=str,
@@ -138,6 +140,7 @@ if __name__ == "__main__":
     coarse_args = AttrDict({
         'checkpoint_path': args.checkpoint_path,
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'iteration_to_load': args.iteration_to_load,
         'output_dir': coarse_output_dir,
         'eval': args.eval,
@@ -159,6 +162,7 @@ if __name__ == "__main__":
     # ----- Extract mesh from coarse SuGaR -----
     coarse_mesh_args = AttrDict({
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'checkpoint_path': args.checkpoint_path,
         'iteration_to_load': args.iteration_to_load,
         'coarse_model_path': coarse_sugar_path,
@@ -181,6 +185,7 @@ if __name__ == "__main__":
     # ----- Refine SuGaR -----
     refined_args = AttrDict({
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'checkpoint_path': args.checkpoint_path,
         'mesh_path': coarse_mesh_path,      
         'output_dir': refined_output_dir,
@@ -203,6 +208,7 @@ if __name__ == "__main__":
     if args.export_uv_textured_mesh:
         refined_mesh_args = AttrDict({
             'scene_path': args.scene_path,
+            'resolution': args.resolution,
             'iteration_to_load': args.iteration_to_load,
             'checkpoint_path': args.checkpoint_path,
             'coarse_mesh_dir': coarse_mesh_output_dir,
@@ -232,6 +238,7 @@ if __name__ == "__main__":
             ),
             "texture_square_size": args.square_size,
             "eval": args.eval,
+            "resolution": args.resolution,
         }
         manifest_path = os.path.join(args.output_path, "run_manifest.json")
         os.makedirs(args.output_path, exist_ok=True)

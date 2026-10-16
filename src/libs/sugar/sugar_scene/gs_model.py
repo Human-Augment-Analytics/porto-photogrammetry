@@ -85,6 +85,7 @@ class GaussianSplattingWrapper:
                  background=[0., 0., 0.],
                  white_background=False,
                  remove_camera_indices=[],
+                 resolution=-1,
                  ) -> None:
         """Initialize the Gaussian Splatting model wrapper.
         
@@ -105,6 +106,7 @@ class GaussianSplattingWrapper:
             white_background (bool, optional): If True, uses a white background instead of black. Defaults to False.
             remove_camera_indices (list, optional): List of indices of cameras to remove from the set of cameras. 
                 Defaults to [].
+            resolution (int, optional): Vanilla 3DGS downscale or target width; -1 caps width at 1600.
         """
         self.source_path = source_path
         self.output_path = output_path
@@ -116,6 +118,7 @@ class GaussianSplattingWrapper:
         
         if model_params is None:
             model_params = ModelParams()
+        model_params.resolution = resolution
         if pipeline_params is None:
             pipeline_params = PipelineParams()
         if opt_params is None:
@@ -136,6 +139,7 @@ class GaussianSplattingWrapper:
             load_gt_images=load_gt_images,
             white_background=white_background,
             remove_indices=remove_camera_indices,
+            resolution=resolution,
             )
         
         if eval_split:
