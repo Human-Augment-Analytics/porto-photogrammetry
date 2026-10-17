@@ -23,6 +23,22 @@ Differences from vanilla 3DGS:
 - **Mask support** — with `gt_alpha_mask`, background pixels are set to `bg_color` in the GT and
   alpha is concatenated as a 4th supervision channel.
 
+### Local additions: silhouette and hull losses (off by default)
+
+Two terms added in-tree (`eb6d464`), both inert at their defaults:
+
+- **`lambda_mask_hull`** (0) — one-sided loss `relu(alpha - dilate(mask))`: penalises opacity
+  *outside* the GT silhouette, max-pool-dilated by `mask_dilate_kernel` (9) so it kills floaters
+  without eroding concavities. Needs masks.
+- **`lambda_hull`** (0) + **`hull_sdf_path`** — penalises Gaussian centres whose signed distance
+  to a precomputed visual-hull SDF grid is positive (outside), weighted by opacity, annealed
+  linearly from `lambda_hull` at `hull_anneal_start_iter` (500) to 0 at
+  `hull_anneal_end_iter` (15000). The grid is an `.npz` with `sdf [D,H,W]` (z,y,x order) and
+  `lo`/`hi` bounds; nothing in-tree writes one (`sfm hull` emits a point cloud and mesh, not an
+  SDF), so the term is only reachable with an externally built grid.
+
+Both are exposed on `augenblick recon 2dgs` under the same names.
+
 ## Rendering + mesh extraction
 
 ```bash

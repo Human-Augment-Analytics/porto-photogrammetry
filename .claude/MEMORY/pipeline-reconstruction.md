@@ -16,13 +16,17 @@ augenblick recon sugar --scene <scene_dir> --output <output_dir> \
 
 # 2DGS: training + TSDF mesh extraction
 augenblick recon 2dgs --scene <scene_dir> --output <output_dir> \
-    [--iterations 30000] [--lambda_dist] [--lambda_normal] [--depth_ratio] \
+    [-r -1] [--eval] [--iterations 30000] [--test_iterations ...] [--save_iterations ...] \
+    [--lambda_dist] [--lambda_normal] [--depth_ratio] \
     [--densify_grad_threshold] [--densify_until_iter] [--opacity_cull] [--white_background] \
     [--voxel_size -1.0] [--depth_trunc -1.0] [--sdf_trunc -1.0] [--num_cluster 50] \
-    [--unbounded] [--mesh_res 1024] [--skip_mesh]
+    [--unbounded] [--mesh_res 1024] [--skip_mesh] [--skip_train_export] \
+    [--lambda_mask_hull 0] [--mask_dilate_kernel 9] \
+    [--hull_sdf_path <grid.npz>] [--lambda_hull 0] [--hull_anneal_start_iter 500] [--hull_anneal_end_iter 15000]
 
-# PGSR: copies scene, flattens sparse/0/ → sparse/, trains, TSDF mesh extraction
+# PGSR: links scene, flattens sparse/0/ → sparse/, trains, TSDF mesh extraction
 augenblick recon pgsr --scene <scene_dir> --output <output_dir> \
+    [-r -1] [--eval] [--test_iterations ...] [--save_iterations ...] \
     [--iterations 30000] [--max_abs_split_points 0] [--opacity_cull_threshold 0.05] \
     [--lambda_dssim] [--single_view_weight] [--multi_view_ncc_weight] [--multi_view_geo_weight] \
     [--multi_view_num] [--densify_grad_threshold] [--densify_until_iter] [--white_background] \
@@ -30,7 +34,7 @@ augenblick recon pgsr --scene <scene_dir> --output <output_dir> \
 
 # Gaussian Wrapping: train (--rasterizer ours) → pivot mesh extraction → texture refinement
 augenblick recon gw --scene <scene_dir> --output <output_dir> \
-    [--iterations 30000] [--sh_degree 3] [--max_gaussians 6000000] \
+    [-r -1] [--eval] [--iterations 30000] [--sh_degree 3] [--max_gaussians 6000000] \
     [--densify_until_iter] [--densify_grad_threshold] [--lambda_depth_normal] \
     [--multiview_factor] [--<many>_lr ...] [--extract_iteration] \
     [--n_pivots 2] [--std_factor 3.0] [--n_binary_steps 10] [--isosurface_value 0.0] \
@@ -51,8 +55,16 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
 ## Wrapper-specific behaviour
 
 - **SuGaR / 2DGS / PGSR / GeoSVR** set `cwd` to the backend source dir (`use_cwd = True`).
-- **PGSR** copies the scene and flattens `sparse/0/` → `sparse/` in its `prepare()` hook
-  (PGSR expects no `0/`); the copy is reused if it already exists.
+- **`-r` / `--eval`** come from the shared `ResolutionParams` / `EvalParams` mixins on every
+  backend except SuGaR. `-r -1` caps the long side at 1600 px (GeoSVR maps it onto its own
+  `res_downscale`); `--eval` writes or reuses `split.json` and scores held-out views at the end
+  (see [pipeline-evaluation.md](pipeline-evaluation.md)).
+- **2DGS** `--skip_train_export` skips the per-training-view PNG dump (tens of GB at full
+  resolution); meshing is unaffected. The `*_hull` flags are local loss terms, off by default —
+  see [backend-2dgs.md](backend-2dgs.md).
+- **PGSR** builds `<output>/scene/` in its `prepare()` hook: `images/`/`masks/` symlinked,
+  `sparse/0/*` symlinked file-by-file into a flat `sparse/` (PGSR expects no `0/`), and
+  `split.json` copied. An existing `<output>/scene/` is reused, with `split.json` re-copied.
 - **GW is the exception** (`use_cwd = False`): it invokes `train.py`,
   `pivot_based_mesh_extraction.py`, and `texture_mesh.py` under `src/libs/gaussian_wrapping/` by
   **absolute path with no `cwd`**; imports like `from scene.gaussian_model import ...` resolve

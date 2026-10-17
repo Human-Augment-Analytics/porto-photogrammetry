@@ -12,10 +12,23 @@ git submodule update --init --recursive
 bash scripts/auto_setup.sh          # detects GPU via nvidia-smi, dispatches to a wrapper
 ```
 
-Every wrapper builds the **same toolchain** — `cuda/12.9.1` + torch 2.9.1 (cu129) + numpy 2 —
-and differs only in `GPU_ARCH`. One CUDA generation is deliberate: `onnxruntime-gpu` links CUDA
-12 sonames, so a cu130 torch leaves its GPU provider unloadable (see below). `nvcc` 12.9
-compiles sm_80 through sm_120, so no arch needs a different module.
+Every wrapper but one builds the **same toolchain** — `cuda/12.9.1` + torch 2.9.1 (cu129) +
+numpy 2 — and differs only in `GPU_ARCH`. One CUDA generation is deliberate: `onnxruntime-gpu`
+links CUDA 12 sonames, so a cu130 torch leaves its GPU provider unloadable (see below). `nvcc`
+12.9 compiles sm_80 through sm_120, so no arch needs a different module. **`setup_b200.sh` is
+the outlier**: `cuda/12.8` with the **cu130** torch index, which breaks that alignment.
+
+**The prebuilt HPG envs predate the cu129 alignment** and do not match what their wrappers would
+build today (checked 2026-10-17):
+
+| Env | torch | numpy | `common.sh` module | Notes |
+|---|---|---|---|---|
+| `augenblick_rtx_pro_6000` | 2.9.1+cu130 | 2.2.6 | `cuda/13.0.2` | carries every backend incl. GeoSVR, DVLT |
+| `augenblick_b200` | 2.9.0+cu128 | 1.26.4 | `cuda/12.8` | no SAM 3, DVLT or GeoSVR; drifted from its setup script |
+
+`hpg_slurm/common.sh` loads the module each env was *built* with, not the wrapper's. Rebuilding
+either with `setup_env.sbatch` (`RECREATE=1`) moves it to the wrapper's toolchain; update
+`common.sh`'s `CUDA_MODULE` in the same change.
 
 | Script | GPU | sm |
 |--------|-----|----|
@@ -28,13 +41,18 @@ compiles sm_80 through sm_120, so no arch needs a different module.
 | `setup_rtx_pro_6000.sh` | RTX Pro 6000 Blackwell | 12.0 |
 
 Wrappers export only `GPU_LABEL / GPU_ARCH / CUDA_MODULE / TORCH_SPEC / TORCH_INDEX_URL /
-NUMPY_GENERATION`, then `exec` into `scripts/setup_common.sh`, which does the work (7 stages +
-import verification). `auto_setup.sh` exits 2 with a copy-this-wrapper hint on an unknown
+NUMPY_GENERATION`, then `exec` into `scripts/setup_common.sh`, which does the work (9 stages +
+import verification): torch → `requirements.txt` → VGGT + LightGlue → SAM 3 + DVLT → pytorch3d
+→ nvdiffrast → backend CUDA extensions → `tetra_triangulation` → the `augenblick` package itself
+(so the separate `pip install -e .` in the quick start is a no-op after a full setup). The
+import check covers the SuGaR/2DGS/PGSR rasterizers but **not** GW's, `svraster_cuda`, SAM 3 or
+DVLT — a broken build of those surfaces at run time. `auto_setup.sh` exits 2 with a copy-this-wrapper hint on an unknown
 compute capability.
 
 ### `setup_common.sh` knobs
 
-- `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr"`) — subset of CUDA rasterizers to build.
+- `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr"`) — subset of CUDA extensions to build
+  (`geosvr` builds `src/libs/geosvr/cuda`, i.e. `svraster_cuda`).
 - `SKIP_TETRA=1` — skip the fragile CGAL `tetra_triangulation` build (GW pivot extraction only).
 - `PYTORCH3D_WHEEL=<url>` — install a prebuilt pytorch3d instead of the source build.
 
@@ -136,9 +154,11 @@ The editable installs carry their own dependency lists, which the constraint fil
 - `src/libs/sam3` — stage 4/9, `--no-deps`: its upstream list would pull torch/numpy and break
   the pins. Its three real deps (`timm`, `ftfy`, `regex`) install explicitly, also `--no-deps`,
   and are mirrored in `requirements.txt`.
+- `src/libs/dvlt` — stage 4/9, `--no-deps` for the same reason; every dep it lists is already a
+  `requirements.txt` entry (backend-dvlt.md).
 - `src/libs/pytorch3d` — `install_requires=["iopath"]`.
 - `tetra_triangulation` — `trimesh>=3.20.2`.
-- The eight CUDA rasterizers declare **no** Python deps; they are unaffected by numpy pins
+- The CUDA extensions (eight rasterizers plus `svraster_cuda`) declare **no** Python deps; they are unaffected by numpy pins
   (though they must be rebuilt against the installed torch).
 
 `torch`/`torchvision` look unpinned in the vggt and lightglue lists, but stage 1 installs the
@@ -170,12 +190,11 @@ package is the inner `vggt/`). An editable install made from the old `src/` must
 ## Submodules
 
 `.gitmodules` lists exactly three: `src/libs/light_glue`, `src/libs/pytorch3d`,
-`src/libs/gaussian_wrapping/submodules/Depth-Anything-V2`. Note that
-`src/libs/gaussian_wrapping` **itself** is also a gitlink in the index (`git ls-files --stage`
-shows mode 160000), so edits inside it do not commit with this repo either — check with
-`git ls-files --stage src/libs/<name>` before editing a backend, not against this list alone.
-**`src/libs/sugar` is not a submodule** (older docs claimed it was); it is vendored in-tree, as are
-`src/libs/2dgs`, `src/libs/pgsr`, `src/libs/gaussian_wrapping`, `src/libs/vggt`.
+`src/libs/gaussian_wrapping/submodules/Depth-Anything-V2`, and those are the only gitlinks in the
+index (`git ls-files --stage | awk '$1=="160000"'`); edits inside them do not commit with this
+repo. **`src/libs/sugar` is not a submodule** (older docs claimed it was); it is vendored
+in-tree, as are `src/libs/2dgs`, `src/libs/pgsr`, `src/libs/gaussian_wrapping`, `src/libs/vggt`,
+and the trimmed, locally patched `src/libs/sam3`, `src/libs/dvlt` and `src/libs/geosvr`.
 
 ## GPU notes
 

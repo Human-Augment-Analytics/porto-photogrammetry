@@ -1,10 +1,10 @@
 # Augenblick
 
-A two-stage photogrammetry pipeline for high-fidelity 3D object reconstruction from multi-view images. The pipeline pairs a Structure-from-Motion (SfM) initialiser with a Gaussian-based mesh extractor.
+A two-stage photogrammetry pipeline for high-fidelity 3D object reconstruction from multi-view images. The pipeline pairs a Structure-from-Motion (SfM) initialiser with a Gaussian- or voxel-based surface reconstructor.
 
 ## Overview
 
-Modern photogrammetry pipelines are two-stage: an SfM method first estimates camera parameters and a sparse point cloud, which then initialises a dense surface reconstruction step. This project evaluates how different SfM initialisations interact with Gaussian-primitive-based mesh extraction methods.
+Modern photogrammetry pipelines are two-stage: an SfM method first estimates camera parameters and a sparse point cloud, which then initialises a dense surface reconstruction step. This project evaluates how different SfM initialisations interact with primitive-based (Gaussian or sparse-voxel) mesh extraction methods.
 
 **Stage 0 – Masking** (only for scenes that ship no `masks/`):
 
@@ -21,9 +21,11 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | COLMAP | Classical incremental SfM with SIFT features and bundle adjustment |
 | VGGT | Feed-forward transformer that regresses camera parameters and a point map in a single pass |
 | VGGT + BA | VGGT output refined by VGGSfM tracking and bundle adjustment |
+| DVLT | NVIDIA Deja View looping transformer: feed-forward poses and points, like VGGT without BA |
 | Turntable | Refines an existing SfM scene with an exact turntable rig prior (fixed axis, constant step) |
+| Hull | Replaces an existing scene's sparse points with a visual hull carved from the masks |
 
-**Stage 2 – Gaussian Mesh Extraction:**
+**Stage 2 – Surface Reconstruction:**
 
 | Method | Description |
 |--------|-------------|
@@ -31,6 +33,7 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | 2DGS | Flat 2D Gaussian surfel disks with TSDF depth fusion |
 | PGSR | Planar-consistent Gaussians with multi-view geometric/photometric losses and TSDF meshing |
 | Gaussian Wrapping | Stochastic oriented Gaussians with pivot-based marching-tetrahedra extraction and texture refinement |
+| GeoSVR | Sparse-voxel octree (SVRaster) with a Depth-Anything-V2 depth prior, multi-view regularisers and TSDF meshing |
 
 All combinations are benchmarked on runtime and compared qualitatively against RealityScan (commercial) and Meshroom (open-source) baselines.
 
@@ -78,7 +81,7 @@ declares no dependencies of its own, so pip must not touch the pinned numpy/torc
 pip install -e . --no-deps --no-build-isolation
 ```
 
-Use `BACKENDS="2dgs pgsr"` to install a subset of backends, or `SKIP_TETRA=1` to skip the
+Use `BACKENDS="2dgs pgsr"` to install a subset of backends (default: `sugar 2dgs pgsr gw geosvr`), or `SKIP_TETRA=1` to skip the
 Gaussian Wrapping CGAL build.
 
 numpy and the packages built against its C-ABI (`scipy`, `scikit-learn`, `scikit-image`) are
@@ -116,10 +119,13 @@ python -m pip install \
     src/libs/gaussian_wrapping/submodules/diff-gaussian-rasterization-ms \
     src/libs/gaussian_wrapping/submodules/fused-ssim \
     src/libs/gaussian_wrapping/submodules/warp-patch-ncc \
+    src/libs/geosvr/cuda \
     --no-build-isolation
 
-# Install VGGT as editable package
+# Install VGGT, SAM 3 and DVLT as editable packages
 python -m pip install -e src/libs/vggt --no-build-isolation
+python -m pip install -e src/libs/sam3 --no-deps --no-build-isolation
+python -m pip install -e src/libs/dvlt --no-deps --no-build-isolation
 
 # Build and install Tetra-NeRF triangulation module
 export CPATH=$CUDA_HOME/targets/x86_64-linux/include:$CPATH
@@ -135,7 +141,7 @@ make
 pip install -e .
 ```
 
-VGGT model weights (~4 GB) are downloaded automatically from `facebook/VGGT-1B` on HuggingFace on first run, into `$HF_HOME` if it is set.
+Model weights are downloaded from HuggingFace on first run, into `$HF_HOME` if it is set: VGGT from `facebook/VGGT-1B` (~4 GB), DVLT from `nvidia/dvlt`, and GeoSVR's depth prior from `depth-anything/Depth-Anything-V2-Large-hf` (1.3 GB, CC-BY-NC-4.0).
 
 ## Project Structure
 
@@ -148,9 +154,9 @@ augenblick/
 │   ├── augenblick/            # The pipeline package (provides the `augenblick` CLI)
 │   │   ├── core/              #   Scene, config↔argparse bridge, registry, process, timing
 │   │   ├── masking/           #   rembg, threshold, sam3
-│   │   ├── sfm/               #   vggt, colmap, turntable, hull
-│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw
-│   │   ├── eval/              #   Held-out split, masked PSNR/SSIM/LPIPS scorer
+│   │   ├── sfm/               #   vggt, dvlt, colmap, turntable, hull
+│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw, geosvr
+│   │   ├── eval/              #   Held-out split, masked NVS metrics, mesh scoring, metric scale
 │   │   └── cli/               #   Argument parsing and exit codes
 │   ├── libs/                  # Third-party backends (vendored + submodules)
 │   │   ├── vggt/              # VGGT model (Meta)
@@ -180,6 +186,11 @@ augenblick/
 │   │   │   ├── scene/              # Scene + GaussianModel + Mesh
 │   │   │   ├── scripts/            # End-to-end driver scripts
 │   │   │   └── submodules/         # CUDA rasterizers + tetra triangulation
+│   │   ├── geosvr/            # GeoSVR (vendored, locally patched)
+│   │   │   ├── cuda/               # svraster_cuda extension
+│   │   │   ├── cfg/                # yacs presets (dtu_mesh.yaml, ...)
+│   │   │   └── mesh_extract/       # TSDF meshing scripts
+│   │   ├── dvlt/              # DVLT (NVIDIA Deja View)
 │   │   ├── sam3/              # SAM 3 (vendored, trimmed to the image-masking path)
 │   │   ├── light_glue/        # LightGlue (submodule)
 │   │   └── pytorch3d/         # PyTorch3D (submodule)
@@ -281,6 +292,12 @@ augenblick sfm vggt \
     --output /output/vggt/ \
     --conf_perc_thresh 25.0
 
+# DVLT (feed-forward, no BA); --use_masks drops points outside masks/
+augenblick sfm dvlt \
+    --scene /path/to/scene/ \
+    --output /output/dvlt/ \
+    --use_masks --inference_steps 12
+
 # Masked COLMAP (SIFT restricted to the object masks)
 # Incremental SfM via pycolmap; features are only extracted inside masks/,
 # so background clutter does not pollute the reconstruction.
@@ -346,16 +363,31 @@ augenblick recon gw --scene <sfm> --output /output/gw/ \
     --n_pivots 2 --std_factor 3.0 --n_binary_steps 10 --isosurface_value 0.0
 ```
 
+#### GeoSVR
+
+```bash
+augenblick recon geosvr --scene <sfm> --output /output/geosvr/
+```
+
+Runs training, renders the views, then fuses rendered depths into a TSDF mesh. Defaults load
+the upstream `dtu` preset, which suits masked objects. `--lambda_mask` (default 0.1) requires a
+mask for every image, so pass `--lambda_mask 0` on an unmasked scene. `--lambda_depthanythingv2 0`
+turns off the depth prior. `--tsdf auto` (default) sizes the TSDF from the cameras, so it works
+at any SfM scale. Every GeoSVR script needs a GPU, even for `--help`. Upstream keeps all decoded
+images in host memory: ~430 × 24 MP views peak at ~71 GB, so request 128 GB of RAM for such
+scenes.
+
 ### Novel-view evaluation
 
 `--eval` holds views out of training and scores the reconstruction on them afterwards. It is
-supported by `2dgs`, `pgsr` and `gw`, and the protocol is identical across the three, so their
-numbers are directly comparable:
+supported by `2dgs`, `pgsr`, `gw` and `geosvr`, and the protocol is identical across them, so
+their numbers are directly comparable:
 
 ```bash
 augenblick recon 2dgs --scene <sfm> --output /output/2dgs_eval/ --eval -r 2 --skip_train_export
 augenblick recon pgsr --scene <sfm> --output /output/pgsr_eval/ --eval -r 2
 augenblick recon gw   --scene <sfm> --output /output/gw_eval/   --eval -r 2
+augenblick recon geosvr --scene <sfm> --output /output/geosvr_eval/ --eval -r 2
 ```
 
 Each run writes `<output>/nvs_metrics.json` holding masked PSNR, SSIM and LPIPS averaged over
@@ -388,6 +420,32 @@ without exposure compensation: that stage fits one exposure per training camera,
 camera has none, and leaving it on would score the reconstruction against an exposure it was
 never given. `sugar` does not support `--eval`.
 
+### Mesh evaluation and metric scale
+
+Evaluation is not part of the `augenblick` CLI; each scorer is a module. Score a mesh against a
+reference mesh:
+
+```bash
+python -m augenblick.eval.mesh --ours <mesh.ply> --reference <ref.ply> [--rigid]
+```
+
+Without `--rigid` the mesh is registered with a similarity transform, which solves for scale and
+so cannot report scale error. `--rigid` fixes scale at 1.0, which only makes sense once the mesh
+is in metric units. A COLMAP reconstruction has an arbitrary scale, so an unscaled mesh scored
+with `--rigid` gets F = 0 at every tolerance.
+
+To recover millimetres, photograph printed scale bars with coded targets alongside the specimen:
+
+```bash
+python -m augenblick.eval.scale --model <sfm>/sparse/0 --scene <scene> \
+    --detections detections.json --primary <code> <code> --check <code> <code> \
+    --apply-to <mesh.ply> --json-out scale_result.json
+```
+
+The scale is fitted on the primary bar and checked against the check bar. The command exits 0
+and writes the scaled mesh only when the scale passes its acceptance gates. The full protocol is
+in [docs/scale-protocol.md](docs/scale-protocol.md).
+
 ### Output
 
 | Method | Output files | Location |
@@ -396,6 +454,7 @@ never given. `sugar` does not support `--eval`.
 | 2DGS | Triangle mesh (`.ply`) | `<model>/train/ours_<iter>/fuse_post.ply` |
 | PGSR | Triangle mesh (`.ply`) | `<model>/mesh/tsdf_fusion_post.ply` |
 | Gaussian Wrapping | Extracted mesh, post-processed mesh, textured mesh (`.ply`) | `<output>/mesh_ours_2pivots{,_post,_post_texture_refined_<iter>}.ply` |
+| GeoSVR | Triangle mesh (`.ply`) | `<output>/mesh/tsdf/tsdf_fusion_post.ply` |
 
 ## Baselines
 
@@ -489,6 +548,13 @@ run on an NVIDIA B200 80 GB GPU.
       archivePrefix={arXiv},
       primaryClass={cs.CV},
       url={https://arxiv.org/abs/2604.07337}, 
+}
+
+@article{li2025geosvr,
+  title={GeoSVR: Taming Sparse Voxels for Geometrically Accurate Surface Reconstruction},
+  author={Li, Jiahe and Zhang, Jiawei and Zhang, Youmin and Bai, Xiao and Zheng, Jin and Yu, Xiaohan and Gu, Lin},
+  journal={Advances in Neural Information Processing Systems},
+  year={2025}
 }
 
 @inproceedings{schoenberger2016sfm,

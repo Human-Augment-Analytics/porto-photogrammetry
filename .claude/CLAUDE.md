@@ -26,12 +26,13 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [environment-and-gpu.md](MEMORY/environment-and-gpu.md) | Install via `scripts/`, per-GPU wrappers, numpy/build gotchas, submodules, GPU notes |
 | [data-morphosource.md](MEMORY/data-morphosource.md) | MorphoSource downloader: flags, project 000381689 contents, API gotchas |
 | [pipeline-masking.md](MEMORY/pipeline-masking.md) | The `mask` stage: contract, `rembg`/`threshold`/`sam3` methods, `--images` input, why it exists |
-| [pipeline-sfm.md](MEMORY/pipeline-sfm.md) | Data prep + all four SfM entry points with full flags (incl. turntable algorithm) |
+| [pipeline-sfm.md](MEMORY/pipeline-sfm.md) | Data prep + all five SfM entry points with full flags (incl. turntable algorithm, hull carving) |
 | [pipeline-reconstruction.md](MEMORY/pipeline-reconstruction.md) | The five reconstruction wrappers, their flags, and output paths |
 | [pipeline-evaluation.md](MEMORY/pipeline-evaluation.md) | The `eval` package: split, masked NVS metrics, mesh scoring, registration modes |
 | [pipeline-scale.md](MEMORY/pipeline-scale.md) | Metric scale from printed scale bars: inputs, windows, acceptance gates |
 | [scene-format.md](MEMORY/scene-format.md) | COLMAP scene layout, mask naming, end-to-end data flow |
 | [backend-vggt.md](MEMORY/backend-vggt.md) | VGGT architecture, utils, COLMAP conversion, coordinate conventions |
+| [backend-dvlt.md](MEMORY/backend-dvlt.md) | DVLT install, trimmed vendoring + local patches, weights licence |
 | [backend-sugar.md](MEMORY/backend-sugar.md) | SuGaR four-stage pipeline, extraction, components |
 | [backend-2dgs.md](MEMORY/backend-2dgs.md) | 2DGS surfels, losses, TSDF/marching-cubes extraction |
 | [backend-pgsr.md](MEMORY/backend-pgsr.md) | PGSR planar Gaussians, multi-view losses, TSDF meshing |
@@ -49,7 +50,7 @@ a plan and the code disagree, the code wins. See [repo-conventions.md](MEMORY/re
 ## Project overview
 
 **Augenblick** is a two-stage photogrammetry pipeline producing 3D meshes from multi-view
-images: an SfM initialiser feeds a Gaussian-primitive-based surface reconstructor. The research
+images: an SfM initialiser feeds a Gaussian- or sparse-voxel-based surface reconstructor. The research
 question is how different SfM initialisations interact with each mesh extractor.
 
 | Stage | Options |
@@ -57,7 +58,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 | Data acquisition | `scripts/download_morphosource_project.py` (MorphoSource project 000381689) |
 | Data preparation | `pipeline/preparation/prepare_uf_dataset.py` |
 | Masking | `augenblick mask {rembg,threshold,sam3}` — produces `masks/` from a flat images folder |
-| SfM | `augenblick sfm {vggt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
+| SfM | `augenblick sfm {vggt,dvlt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
 | Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw,geosvr}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
 | Evaluation | `python -m augenblick.eval.{nvs,mesh,scale}` — not on the `augenblick` CLI |
@@ -70,7 +71,7 @@ Everything between the stages is a COLMAP scene: `images/` + optional `masks/` +
 conda create --name augenblick python=3.10 && conda activate augenblick
 git submodule update --init --recursive
 bash scripts/auto_setup.sh                  # detects GPU, dispatches to setup_<gpu>.sh
-pip install -e . --no-deps --no-build-isolation   # the augenblick CLI; flags are mandatory
+pip install -e . --no-deps --no-build-isolation   # the CLI (setup's last stage does it too); flags are mandatory
 
 augenblick mask rembg --images <images> --output <scene>   # only if the scene has no masks/
 augenblick sfm vggt --scene <scene> --output <sfm> --use_ba
@@ -85,8 +86,12 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 
 - `augenblick mask` takes **`--images`** (a flat folder), not `--scene`: it produces a scene
   rather than consuming one. `sfm`/`recon` still take `--scene`. See pipeline-masking.md.
-- `augenblick sfm turntable` refines an **existing** COLMAP scene; it is a post-SfM step, not a
-  standalone SfM. The `SceneRefiner` base class enforces this.
+- `augenblick sfm turntable` and `sfm hull` refine an **existing** COLMAP scene; they are
+  post-SfM steps, not standalone SfM. The `SceneRefiner` base class enforces this; `hull` also
+  needs `masks/`. Its init cloud (`sparse/0/points3D.ply`) reaches every backend but GeoSVR,
+  which reads `points3D.bin`.
+- On HPG only `GPU=rtx6000` (`augenblick_rtx_pro_6000`) carries SAM 3, DVLT and GeoSVR; the
+  B200 env predates them. See environment-and-gpu.md.
 - The `augenblick` CLI comes from `pip install -e . --no-deps --no-build-isolation` and must be
   installed into **each** per-GPU conda env — the SLURM jobs call the bare console script.
 - A new job on **either** cluster sources `common.sh` (torch) or `meshroom_common.sh`
@@ -111,11 +116,12 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 - `download_morphosource_project.py` defaults to a **seeded 3-specimen sample** (~3.2 GB), not
   the whole 869 GB project; `--dry-run` costs nothing and needs no API key.
 - All third-party backends live under `src/libs/` (`2dgs`, `pgsr`, `sugar`,
-  `gaussian_wrapping`, `geosvr`, `vggt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
+  `gaussian_wrapping`, `geosvr`, `vggt`, `dvlt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
   `src/augenblick/` (the package), `pipeline/preparation/`, and `src/utils/`.
-- `src/libs/sam3` is a **trimmed** vendored copy (image-masking path only) with marked
-  `LOCAL PATCH (augenblick)` edits — never sync it wholesale from upstream, and do not delete
-  `perflib/fa3.py`, lazily imported on Hopper. See pipeline-masking.md.
+- `src/libs/{sam3,dvlt,geosvr}` carry marked `LOCAL PATCH (augenblick)` edits (sam3 and dvlt
+  are also trimmed to inference) — never sync them wholesale from upstream; re-apply the patches
+  listed in pipeline-masking.md, backend-dvlt.md, backend-geosvr.md. Do not delete sam3's
+  `perflib/fa3.py`, lazily imported on Hopper.
 - `augenblick mask sam3` is GPU-only and needs a checkpoint from the **gated** HF repo
   `facebook/sam3`; it takes a text `--prompt` (default `skeleton`).
 - Only `src/libs/light_glue`, `src/libs/pytorch3d`, and `src/libs/gaussian_wrapping/submodules/Depth-Anything-V2`

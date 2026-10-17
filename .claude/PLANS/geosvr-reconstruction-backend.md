@@ -8,7 +8,7 @@ where it and the code disagree, the code wins. The durable description belongs i
 **Scope:** the code and the job scripts treat `geosvr` like any other backend on both clusters.
 Installing and verifying it covers only the HPG env `augenblick_rtx_pro_6000`. Other envs pick
 it up from `setup_common.sh` (`BACKENDS` default) on their next rebuild. B200 waits on its env
-drift being fixed (see [dvlt-sfm-method.md](dvlt-sfm-method.md)). Verified 2026-10-10 against the tree at `2aa09ce` and upstream GeoSVR at
+drift being fixed (see environment-and-gpu.md). Verified 2026-10-10 against the tree at `2aa09ce` and upstream GeoSVR at
 **`44bf7e74471e4cbeb2a11a7f86870208a2861bd1`** (2026-01-02). Upstream line references are to
 that commit.
 

@@ -28,7 +28,8 @@ module carries its own argparse main instead: `python -m augenblick.eval.{nvs,me
 ## Novel-view metrics (`eval/nvs.py`, `eval/metrics.py`)
 
 Reads the PNG pairs under `<output>/test/ours_<iter>/{renders,gt}` (highest iteration unless
-`--iteration`) and writes `<output>/nvs_metrics.json`, recording `"metric_domain": "mask"`.
+`--iteration`; auto-pick also accepts GeoSVR's `ours_<iter>_r<res>` dirs, but an explicit
+`--iteration N` looks for `ours_N` verbatim and so misses them — omit it for GeoSVR) and writes `<output>/nvs_metrics.json`, recording `"metric_domain": "mask"`.
 Rescore without retraining:
 
 ```bash

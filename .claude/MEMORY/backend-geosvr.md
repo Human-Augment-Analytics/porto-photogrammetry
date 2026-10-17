@@ -5,7 +5,8 @@ sparse-voxel octree drawn by the custom CUDA extension `svraster_cuda`, not Gaus
 uncertainty-weighted Depth-Anything-V2 depth prior and voxel-surface regularisers (PGSR's
 multi-view NCC + geometric losses, surface rectification, scaling penalty). The mesh comes from
 TSDF-fusing rendered depths. SfM points set **only the scene bound** (`bound_mode: pcd`); they
-never seed primitives.
+never seed primitives. They are read from `points3D.bin`, never `points3D.ply`, so an
+`sfm hull` scene trains GeoSVR exactly like the SfM it was carved from.
 
 Wrapper: `augenblick recon geosvr` (`src/augenblick/reconstruction/geosvr.py`); flags in
 [pipeline-reconstruction.md](pipeline-reconstruction.md).
@@ -47,7 +48,7 @@ Everything goes under the output dir; the input scene is read in place and never
 | `checkpoints/iter<n>_model.pt` | voxel model |
 | `mono_priors/depthanythingv2/` | cached DA2 depths (patched; upstream wrote into the scene) |
 | `train/ours_<iter>_r<res_downscale>/renders` | train-view renders; the TSDF scripts read **colour** from here |
-| `test/ours_<iter>_r<res_downscale>/{renders,gt}` | held-out renders with `--eval`; note the suffix |
+| `test/ours_<iter>_r<res_downscale>/{renders,gt}` | held-out renders with `--eval`; note the suffix (`eval.nvs` auto-picks it, but not with `--iteration`) |
 | `mesh/tsdf/tsdf_fusion_post.ply` | final mesh (`mesh_path()`) |
 
 `--tsdf auto` (default) runs `tsdf_mesh_360.py`, which sizes the TSDF from the cameras
