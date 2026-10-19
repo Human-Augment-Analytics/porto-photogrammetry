@@ -88,6 +88,67 @@ residuals instead of being fitted away. The similarity fit remains useful as a s
 labelled shape-only comparison, and the ratio of the bar-derived scale to the
 similarity-fitted one is itself a measurement of metric-scale error.
 
+## Best-effort estimation for single-bar captures
+
+Most captures carry one bar, not two, so no in-capture check bar exists, and a gated
+protocol would refuse much of the collection over failure modes the downstream metric
+comparison catches anyway. Omitting `--check` therefore selects a best-effort estimate
+instead of a verdict: the bar is measured over every short span of consecutive views
+observing both targets (drift-tolerant, because marker positions drift smoothly over a
+capture while short spans stay rigid), each span triangulated robustly under a
+reprojection gate proportional to the bar's apparent pixel size (defocus-tolerant,
+because the decoded centre error of large, out-of-focus targets grows with apparent
+size), and the span lengths pool into a median scale. The output always carries the
+estimate with its support (spans, rings) and dispersion (median absolute deviation,
+interquartile range, spread); nothing is accepted or rejected, and a consumer must read
+the support and dispersion columns, not just the number. On captures where a gated
+windowed variant could also produce a scale, the two were measured to agree to about a
+tenth of a percent. Prefer the two-bar protocol whenever a check bar exists: an
+independent withheld ruler is strictly stronger evidence.
+
+## The codebook
+
+The detector's canonical code for a bit pattern does not determine the printed bar
+length: the same code pair has been photographed on bars of different lengths in this
+collection. Treating codes as identifying a bar produces a silent factor-level scale
+error, and when both bars of a two-bar capture share a wrong assumed length, the check
+bar cannot catch it. `--known-length-mm` is therefore always explicit, with no default.
+`docs/bar-codebook.json` records every code pair observed so far with its
+photo-verified printed length; before scaling a new capture, open one photograph,
+read the printed labels and length, and extend the codebook.
+
+## End-to-end walkthrough for a new specimen
+
+1. Reconstruct with masked COLMAP as usual; the sparse model defines the gauge.
+2. Detect the targets on the unmasked photographs of the bar-bearing position
+   (requires a PGT-Toolkit checkout; it has no PyPI release):
+
+       python -m augenblick.eval.detect \
+           --images data/<scene>/images \
+           --output detections.json \
+           --toolkit <pgt-toolkit checkout>
+
+3. Verify the codes and printed length on a photograph; consult and extend
+   `docs/bar-codebook.json`.
+4. Estimate, check and apply the scale (omit `--check` for single-bar captures):
+
+       python -m augenblick.eval.scale \
+           --model results/<scene>/colmap/sparse/0 \
+           --scene data/<scene> \
+           --detections detections.json \
+           --primary 1675 1419 --check 1181 1949 \
+           --known-length-mm 100 \
+           --apply-to results/<scene>/2dgs/train/ours_30000/fuse_post.ply \
+           --json-out scale_result.json
+
+5. Score the scaled mesh rigidly against the metric reference:
+
+       python -m augenblick.eval.mesh --ours mesh_mm.ply --reference gt.obj \
+           --rigid --absolute-tolerances 0.25 0.5 1.0 --json-out rigid_scores.json
+
+On HiPerGator, `hpg_slurm/scale_markers.sbatch` runs steps 2 and 4 and
+`hpg_slurm/geometry_eval.sbatch` runs step 5.
+
 ## Usage
 
     python -m augenblick.eval.scale \
@@ -95,6 +156,7 @@ similarity-fitted one is itself a measurement of metric-scale error.
         --scene data/<scene> \
         --detections detections.json \
         --primary 1675 1419 --check 1181 1949 \
+        --known-length-mm 100 \
         --apply-to results/<scene>/2dgs/train/ours_30000/fuse_post.ply \
         --json-out scale_result.json
 
