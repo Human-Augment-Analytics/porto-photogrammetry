@@ -36,24 +36,28 @@ class GeosvrConfig(EvalParams, ResolutionParams):
         "help": "Depth-Anything-V2 prior weight; 0 disables the prior and the mono-normal loss built on it"})
     da2_uncertainty: bool = field(default=True, metadata={
         "help": "Weight the depth prior by voxel uncertainty"})
+    power_level_uncertainty: float = field(default=1.0, metadata={
+        "help": "Exponent on the voxel-level uncertainty weight; upstream suggests 0.2 for NVS"})
+    voxel_dropout_min: float = field(default=0.5, metadata={
+        "help": "After iter 1000, draw the render supersampling factor from U(this, ss); 1 disables"})
     multi_view_ncc_weight: float = field(default=0.05, metadata={
         "help": "Multi-view NCC patch-matching weight"})
     multi_view_geo_weight: float = field(default=0.01, metadata={
         "help": "Multi-view geometric consistency weight"})
     lambda_rectify: float = field(default=1e-5, metadata={
         "help": "Surface rectification regulariser weight"})
-    lambda_scaling_penalty: float = field(default=5e-7, metadata={
+    lambda_scaling_penalty: float = field(default=1e-6, metadata={
         "help": "Voxel scaling penalty weight"})
-    lambda_mask: float = field(default=0.1, metadata={
+    lambda_mask: float = field(default=0.5, metadata={
         "help": "Rendered-alpha vs mask loss weight, on for parity with 2DGS/GW; 0 disables"})
     white_background: bool = field(default=False, metadata={"help": "Use white background"})
-    tsdf: Literal["auto", "fixed"] = field(default="auto", metadata={
+    tsdf: Literal["auto", "fixed"] = field(default="fixed", metadata={
         "help": "auto sizes the TSDF from the cameras; fixed uses the absolute flags below"})
     radius_scale: float = field(default=2.0, metadata={
         "help": "auto TSDF: max depth as a multiple of the camera-to-focus distance"})
-    voxel_size: float = field(default=0.002, metadata={"help": "fixed TSDF: voxel size"})
+    voxel_size: float = field(default=0.001, metadata={"help": "fixed TSDF: voxel size"})
     max_depth: float = field(default=5.0, metadata={"help": "fixed TSDF: max depth"})
-    sdf_trunc_scale: float = field(default=2.0, metadata={
+    sdf_trunc_scale: float = field(default=4.0, metadata={
         "help": "fixed TSDF: truncation as a multiple of the voxel size"})
     num_cluster: int = field(default=1, metadata={"help": "Connected components to keep in mesh"})
     use_depth_filter: bool = field(default=False, metadata={
@@ -119,6 +123,8 @@ class GeosvrBackend(SubprocessBackend):
             "--sche_mult", str(c.sche_mult),
             "--lambda_depthanythingv2", str(c.lambda_depthanythingv2),
             _flag("enable_da2_uncertainty", c.da2_uncertainty),
+            "--power_level_uncertainty", str(c.power_level_uncertainty),
+            "--voxel_dropout_min", str(c.voxel_dropout_min),
             "--multi_view_ncc_weight", str(c.multi_view_ncc_weight),
             "--multi_view_geo_weight", str(c.multi_view_geo_weight),
             "--lambda_rectify", str(c.lambda_rectify),

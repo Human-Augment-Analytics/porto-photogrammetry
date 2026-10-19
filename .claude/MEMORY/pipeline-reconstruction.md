@@ -45,10 +45,11 @@ augenblick recon gw --scene <scene_dir> --output <output_dir> \
 # GeoSVR: sparse-voxel training (yacs preset + flags) → render → TSDF mesh
 augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
     [--preset dtu|tnt|none] [--sche_mult 1.0] [--lambda_depthanythingv2 0.1] \
-    [--no-da2_uncertainty] [--multi_view_ncc_weight 0.05] [--multi_view_geo_weight 0.01] \
-    [--lambda_rectify 1e-5] [--lambda_scaling_penalty 5e-7] [--lambda_mask 0.1] \
-    [--white_background] [--tsdf auto|fixed] [--radius_scale 2.0] \
-    [--voxel_size 0.002] [--max_depth 5.0] [--sdf_trunc_scale 2.0] \
+    [--no-da2_uncertainty] [--power_level_uncertainty 1.0] [--voxel_dropout_min 0.5] \
+    [--multi_view_ncc_weight 0.05] [--multi_view_geo_weight 0.01] \
+    [--lambda_rectify 1e-5] [--lambda_scaling_penalty 1e-6] [--lambda_mask 0.5] \
+    [--white_background] [--tsdf fixed|auto] [--radius_scale 2.0] \
+    [--voxel_size 0.001] [--max_depth 5.0] [--sdf_trunc_scale 4.0] \
     [--num_cluster 1] [--use_depth_filter] [-r -1] [--eval]
 ```
 
@@ -72,7 +73,7 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
   forwarded **only to the training step** (gated on `accepts_passthrough`). Boolean toggles use
   `argparse.BooleanOptionalAction`, hence the `--no-postprocess` / `--no-filter_large_edges`
   spellings (both default on).
-- **GeoSVR** reads the scene in place (no `prepare()`) and writes nothing outside the output dir. It loads a yacs preset (`cfg/dtu_mesh.yaml`), then overrides it with explicit flags, every bool as `--x`/`--no-x`; vendored patches make flags reliably beat the preset. `--lambda_mask` (default 0.1) requires a mask for every image, checked in `validate()`. Held-out renders land in `test/ours_<iter>_r<res_downscale>/`, which `find_test_dir` accepts.
+- **GeoSVR** reads the scene in place (no `prepare()`) and writes nothing outside the output dir. It loads a yacs preset (`cfg/dtu_mesh.yaml`), then overrides it with explicit flags, every bool as `--x`/`--no-x`; vendored patches make flags reliably beat the preset. `--lambda_mask` (default 0.5) requires a mask for every image, checked in `validate()`. Default choices: [backend-geosvr.md](backend-geosvr.md). Held-out renders land in `test/ours_<iter>_r<res_downscale>/`, which `find_test_dir` accepts.
 
 ## Output locations
 

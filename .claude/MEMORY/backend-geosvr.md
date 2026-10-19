@@ -33,7 +33,7 @@ smoke run never reaches `rectifiy_from: 5000`.
 
 ## Masks and the alpha loss
 
-`--lambda_mask` (wrapper default 0.1, upstream 0) is an L2 between rendered transmittance `T`
+`--lambda_mask` (wrapper default 0.5, upstream 0) is an L2 between rendered transmittance `T`
 and `1 - mask`, on for parity with 2DGS/GW, which supervise alpha as a 4th L1+SSIM channel.
 Upstream reads `cam.mask.cuda()` unguarded, so `validate()` refuses a scene where any image lacks
 `masks/<stem>.png` while `lambda_mask > 0`.
@@ -51,10 +51,21 @@ Everything goes under the output dir; the input scene is read in place and never
 | `test/ours_<iter>_r<res_downscale>/{renders,gt}` | held-out renders with `--eval`; note the suffix (`eval.nvs` auto-picks it, but not with `--iteration`) |
 | `mesh/tsdf/tsdf_fusion_post.ply` | final mesh (`mesh_path()`) |
 
-`--tsdf auto` (default) runs `tsdf_mesh_360.py`, which sizes the TSDF from the cameras
-(`max_depth = radius_scale × min camera-to-focus distance`, `voxel = max_depth / 1536`), so it is
-scale-free. `--tsdf fixed` runs `tsdf_mesh.py` with absolute `--voxel_size`/`--max_depth`, which
-depend on the SfM's arbitrary scale.
+`--tsdf fixed` (default) runs `tsdf_mesh.py` with absolute `--voxel_size 0.001`,
+`--max_depth 5.0` and `--sdf_trunc_scale 4.0` (truncation = scale × voxel); these depend on the
+SfM's arbitrary scale. `--tsdf auto` runs `tsdf_mesh_360.py`, which sizes the TSDF from the
+cameras (`max_depth = radius_scale × min camera-to-focus distance`, `voxel = max_depth / 1536`,
+truncation 5 × voxel), so it is scale-free.
+
+## Default choices
+
+Training and TSDF defaults follow upstream's README guidance (`src/libs/geosvr/README.md`), which
+differs from `cfg/dtu_mesh.yaml` in `lambda_scaling_penalty` (1e-6 vs the preset's 5e-7). Two
+deliberate departures: `lambda_mask 0.5`, picked by eye for background-clutter removal on
+UF_Mammals_1769_cranium (0.5/0.75/1.0 compared), and `voxel_size 0.001`, half upstream's 0.002,
+for a finer mesh (~12M vertices at 0.0005 on that scene, so finer costs RAM and disk fast).
+`power_level_uncertainty` (1.0) and `voxel_dropout_min` (0.5) are exposed at the preset's
+values; upstream suggests `power_level_uncertainty 0.2` for NVS.
 
 ## Runtime gotchas
 

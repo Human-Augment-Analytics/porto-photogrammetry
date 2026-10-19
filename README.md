@@ -370,10 +370,12 @@ augenblick recon geosvr --scene <sfm> --output /output/geosvr/
 ```
 
 Runs training, renders the views, then fuses rendered depths into a TSDF mesh. Defaults load
-the upstream `dtu` preset, which suits masked objects. `--lambda_mask` (default 0.1) requires a
-mask for every image, so pass `--lambda_mask 0` on an unmasked scene. `--lambda_depthanythingv2 0`
-turns off the depth prior. `--tsdf auto` (default) sizes the TSDF from the cameras, so it works
-at any SfM scale. Every GeoSVR script needs a GPU, even for `--help`. Upstream keeps all decoded
+the upstream `dtu` preset, which suits masked objects, overridden where upstream's README
+recommends otherwise. `--lambda_mask` (default 0.5) requires a mask for every image, so pass
+`--lambda_mask 0` on an unmasked scene. `--lambda_depthanythingv2 0` turns off the depth prior.
+`--tsdf fixed` (default) meshes with absolute `--voxel_size 0.001 --max_depth 5.0
+--sdf_trunc_scale 4.0`, which depend on the SfM's scale; `--tsdf auto` sizes the TSDF from the
+cameras, so it works at any SfM scale. Every GeoSVR script needs a GPU, even for `--help`. Upstream keeps all decoded
 images in host memory: ~430 × 24 MP views peak at ~71 GB, so request 128 GB of RAM for such
 scenes.
 

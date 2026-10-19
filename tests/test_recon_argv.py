@@ -314,11 +314,13 @@ def test_geosvr_argv(tmp_path):
         "--sche_mult", "1.0",
         "--lambda_depthanythingv2", "0.1",
         "--enable_da2_uncertainty",
+        "--power_level_uncertainty", "1.0",
+        "--voxel_dropout_min", "0.5",
         "--multi_view_ncc_weight", "0.05",
         "--multi_view_geo_weight", "0.01",
         "--lambda_rectify", "1e-05",
-        "--lambda_scaling_penalty", "5e-07",
-        "--lambda_mask", "0.1",
+        "--lambda_scaling_penalty", "1e-06",
+        "--lambda_mask", "0.5",
         "--no-white_background",
         "--black_background",
         "--blend_mask",
@@ -327,9 +329,11 @@ def test_geosvr_argv(tmp_path):
     ]
     assert render.cmd == [sys.executable, str(GEOSVR / "render.py"), "-m", "/out", "--skip_test"]
     assert mesh.cmd == [
-        sys.executable, str(GEOSVR / "mesh_extract" / "tsdf_mesh_360.py"),
+        sys.executable, str(GEOSVR / "mesh_extract" / "tsdf_mesh.py"),
         "-m", "/out",
-        "--radius_scale", "2.0",
+        "--voxel_size", "0.001",
+        "--max_depth", "5.0",
+        "--sdf_trunc_scale", "4.0",
         "--num_cluster", "1",
     ]
     assert backend.mesh_path(OUT) == OUT / "mesh" / "tsdf" / "tsdf_fusion_post.ply"
@@ -402,16 +406,14 @@ def test_geosvr_always_renders_train_views_for_tsdf(tmp_path):
     assert stages[1].cmd[-1] == "--skip_test"
 
 
-def test_geosvr_tsdf_fixed_switches_script(tmp_path):
+def test_geosvr_tsdf_auto_switches_script(tmp_path):
     scene = _geosvr_scene(tmp_path / "scene")
-    config = GeosvrConfig(tsdf="fixed", use_depth_filter=True)
+    config = GeosvrConfig(tsdf="auto", use_depth_filter=True)
     mesh = GeosvrBackend(config).stages(scene, OUT)[-1].cmd
     assert mesh == [
-        sys.executable, str(GEOSVR / "mesh_extract" / "tsdf_mesh.py"),
+        sys.executable, str(GEOSVR / "mesh_extract" / "tsdf_mesh_360.py"),
         "-m", "/out",
-        "--voxel_size", "0.002",
-        "--max_depth", "5.0",
-        "--sdf_trunc_scale", "2.0",
+        "--radius_scale", "2.0",
         "--num_cluster", "1",
         "--use_depth_filter",
     ]
