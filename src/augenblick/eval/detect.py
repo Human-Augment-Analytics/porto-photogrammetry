@@ -38,16 +38,17 @@ def _worker_init(workdir: str, toolkit: str, modes: str) -> None:
     _WORKER["modes"] = modes.split("+")
 
 
-def _detect_one(photo: str) -> dict | None:
+def _detect_one(job: tuple[str, str]) -> dict | None:
     import cv2
     from targets.targets_engine import PGTEngine
 
+    name, photo = job
     image = cv2.imread(photo)
     if image is None:
         return None
     found = PGTEngine.find_targets_in_image(
-        "CCT_20bit_black", image, Path(photo).name, _WORKER["modes"], None, [0])
-    return {"image": Path(photo).name,
+        "CCT_20bit_black", image, name, _WORKER["modes"], None, [0])
+    return {"image": name,
             "raw_detections": [{"code": target.id, "x": target.center_pt_x,
                                 "y": target.center_pt_y} for target in found]}
 
@@ -63,15 +64,27 @@ def prepare_workdir(toolkit: Path, workdir: Path, circularity: float) -> None:
     (workdir / "settings.yaml").write_text(yaml.safe_dump(settings, sort_keys=False))
 
 
+def plan_jobs(images: list[Path]) -> list[tuple[str, str]]:
+    """Pair each image's recorded name with an absolute path to read it from.
+
+    The name is the one given, not the symlink target's: scene directories link to
+    the original photographs, whose file names can differ in case or prefix from
+    the names the reconstruction knows them by.
+    """
+    return [(Path(p).name, str(Path(p).resolve())) for p in images]
+
+
 def detect_images(images: list[Path], toolkit: Path, *, modes: str = DEFAULT_MODES,
                   circularity: float = DEFAULT_CIRCULARITY,
                   workers: int | None = None, workdir: Path | None = None,
                   skip_unreadable: bool = False) -> list[dict]:
     """Run the decoder over the photographs; order follows the input list."""
     # Workers chdir into the prepared directory, so every path they touch must
-    # survive that: resolve everything in the parent first.
+    # survive that: resolve everything in the parent first. The recorded name stays
+    # the one given, because a symlinked image directory would otherwise record its
+    # targets' names and no longer match the reconstruction's image names.
     toolkit = Path(toolkit).resolve()
-    images = [Path(p).resolve() for p in images]
+    jobs = plan_jobs(images)
     if not (toolkit / "src/pgt_toolkit/targets/targets_engine.py").is_file():
         raise FileNotFoundError(f"No PGT-Toolkit checkout at {toolkit}")
     if workers is None:
@@ -88,8 +101,8 @@ def detect_images(images: list[Path], toolkit: Path, *, modes: str = DEFAULT_MOD
         with multiprocessing.get_context("spawn").Pool(
                 workers, initializer=_worker_init,
                 initargs=(str(prepared), str(toolkit), modes)) as pool:
-            records = pool.map(_detect_one, [str(p) for p in images])
-    unreadable = [img.name for img, r in zip(images, records) if r is None]
+            records = pool.map(_detect_one, jobs)
+    unreadable = [name for (name, _), r in zip(jobs, records) if r is None]
     if unreadable:
         # A silently shrinking examined set would undermine the estimator's
         # one-record-per-photograph accounting, so dropping is opt-in.
