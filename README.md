@@ -388,14 +388,6 @@ without exposure compensation: that stage fits one exposure per training camera,
 camera has none, and leaving it on would score the reconstruction against an exposure it was
 never given. `sugar` does not support `--eval`.
 
-### Metric scale and geometric evaluation
-
-Printed scale bars recover an independent millimetre scale for a reconstruction, and the
-scaled mesh is then scored rigidly against a structured-light reference. The full protocol,
-gates and an end-to-end walkthrough (detection, the bar codebook, scaling, scoring) are in
-[docs/scale-protocol.md](docs/scale-protocol.md); the HiPerGator stages are
-`hpg_slurm/scale_markers.sbatch` and `hpg_slurm/geometry_eval.sbatch`.
-
 ### Output
 
 | Method | Output files | Location |

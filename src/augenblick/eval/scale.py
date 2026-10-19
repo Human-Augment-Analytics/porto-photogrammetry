@@ -158,18 +158,11 @@ class Gates:
     def __post_init__(self):
         if self.min_observations - self.withheld < self.min_inliers:
             raise ValueError("Training observations would fall below the inlier minimum")
-        if not np.isfinite(self.known_length_mm) or self.known_length_mm <= 0:
-            raise ValueError(f"Invalid bar length: {self.known_length_mm}")
 
 
 @dataclass(frozen=True)
 class BarTargets:
-    """Target codes of the two bars, in the detector's own numbering.
-
-    The two-bar protocol needs both: the primary bar sets the scale and the withheld
-    check bar verifies it. Captures with a single bar are estimated with
-    `best_effort_scale` instead, which reports dispersion rather than a verdict.
-    """
+    """The four target codes defining the two bars, in the detector's own numbering."""
 
     primary: tuple[str, str]
     check: tuple[str, str]
@@ -181,7 +174,6 @@ class BarTargets:
 def _window_markers(tracks: dict[str, dict[str, Observation]], names: list[str],
                     gates: Gates) -> dict:
     """Evaluate all four markers inside one window of image names."""
-    max_error_px = gates.max_error_px
     markers = {}
     for code, observations in tracks.items():
         selected = sorted((observations[n] for n in names if n in observations),
@@ -199,7 +191,7 @@ def _window_markers(tracks: dict[str, dict[str, Observation]], names: list[str],
         test = [o for i, o in enumerate(selected) if i in test_indices]
         try:
             fitted = triangulate_track(
-                train, max_error=max_error_px, minimum=gates.min_inliers,
+                train, max_error=gates.max_error_px, minimum=gates.min_inliers,
                 min_consensus=gates.min_consensus,
                 min_ray_angle_deg=gates.min_ray_angle_deg)
         except ValueError as exc:
@@ -207,10 +199,10 @@ def _window_markers(tracks: dict[str, dict[str, Observation]], names: list[str],
             continue
         errors = np.linalg.norm(reprojection_residuals(
             np.array(fitted["xyz"]), test).reshape(-1, 2), axis=1)
-        passed = bool(np.mean(errors <= max_error_px) >= gates.held_out_consensus)
+        passed = bool(np.mean(errors <= gates.max_error_px) >= gates.held_out_consensus)
         markers[code] = {
             **fitted, "passed": passed, "held_out_n": len(test),
-            "held_out_inliers": int(np.sum(errors <= max_error_px)),
+            "held_out_inliers": int(np.sum(errors <= gates.max_error_px)),
             "held_out_errors_px": errors.tolist(),
             "held_out_images": [o.image for o in test],
         }
@@ -219,13 +211,8 @@ def _window_markers(tracks: dict[str, dict[str, Observation]], names: list[str],
 
 def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
                          rings: list[list[str]], bars: BarTargets,
-                         gates: Gates) -> dict:
-    """Estimate scale from every window of every ring, then apply the acceptance gates.
-
-    `gates` has no default because `Gates.known_length_mm` must be the verified
-    printed length of this capture's bars; assuming one silently is exactly the
-    codebook trap documented in docs/scale-protocol.md.
-    """
+                         gates: Gates = Gates()) -> dict:
+    """Estimate scale from every window of every ring, then apply the acceptance gates."""
     missing = [code for code in bars.codes() if code not in tracks]
     if missing:
         raise ValueError(f"No observations for target codes {missing}")
@@ -263,9 +250,8 @@ def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
     from dataclasses import asdict
     result = {
         "protocol": "sliding_window_scale",
-        "predeclared": asdict(gates) | {
-            "primary": list(bars.primary),
-            "check": list(bars.check)},
+        "predeclared": asdict(gates) | {"primary": list(bars.primary),
+                                        "check": list(bars.check)},
         "windows": windows,
         "skipped_rings": skipped_rings,
         "acceptance_checks": checks,
@@ -276,28 +262,26 @@ def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
     if not passing:
         return result
     primary = np.array([w["primary_length_units"] for w in passing])
+    check = np.array([w["check_length_units"] for w in passing])
     scale = gates.known_length_mm / float(np.median(primary))
+    check_mm = check * scale
     checks.update({
         "distinct_rings": len({w["ring"] for w in passing}),
         "distinct_offsets": len({w["offset"] for w in passing}),
         "primary_relative_spread": float((primary.max() - primary.min())
                                          / np.median(primary)),
+        "check_bar_relative_error_max": float(
+            np.abs(check_mm - gates.known_length_mm).max() / gates.known_length_mm),
+        "check_bar_relative_error_median": float(
+            abs(np.median(check_mm) - gates.known_length_mm) / gates.known_length_mm),
     })
     result.update({
         "scale_mm_per_model_unit": scale,
         "scale_mm_per_model_unit_range": [gates.known_length_mm / float(primary.max()),
                                           gates.known_length_mm / float(primary.min())],
         "primary_bar_lengths_mm": (primary * scale).tolist(),
+        "check_bar_lengths_mm": check_mm.tolist(),
     })
-    check = np.array([w["check_length_units"] for w in passing])
-    check_mm = check * scale
-    checks.update({
-        "check_bar_relative_error_max": float(
-            np.abs(check_mm - gates.known_length_mm).max() / gates.known_length_mm),
-        "check_bar_relative_error_median": float(
-            abs(np.median(check_mm) - gates.known_length_mm) / gates.known_length_mm),
-    })
-    result["check_bar_lengths_mm"] = check_mm.tolist()
     result["accepted"] = bool(
         len(passing) >= gates.min_passing_windows
         and checks["distinct_rings"] >= gates.min_distinct_rings
@@ -305,91 +289,6 @@ def sliding_window_scale(tracks: dict[str, dict[str, Observation]],
         and checks["primary_relative_spread"] <= gates.max_primary_spread
         and checks["check_bar_relative_error_max"] <= gates.max_check_error
         and checks["check_bar_relative_error_median"] <= gates.max_check_error)
-    return result
-
-
-BEST_EFFORT_SPAN = 10
-BEST_EFFORT_MIN_INLIERS = 5
-BEST_EFFORT_REL_GATE = 0.005
-BEST_EFFORT_ABS_GATE = 2.0
-
-
-def best_effort_scale(tracks: dict[str, dict[str, Observation]],
-                      rings: list[list[str]], primary: tuple[str, str],
-                      known_length_mm: float, *, span: int = BEST_EFFORT_SPAN,
-                      rel_gate: float = BEST_EFFORT_REL_GATE,
-                      abs_gate: float = BEST_EFFORT_ABS_GATE) -> dict:
-    """Best estimate from everything recoverable, with dispersion instead of gates.
-
-    Marker positions drift smoothly over a turntable capture while short spans of
-    consecutive views stay rigid, so the bar is measured over every short span of
-    views observing both targets, with a reprojection gate proportional to the bar's
-    apparent pixel size. All span lengths are pooled into a median scale with a
-    robust dispersion. Nothing is accepted or rejected: the output always carries
-    the estimate, its support (spans, rings) and its spread, and correctness is
-    judged downstream, for example against a metric reference.
-    """
-    if not np.isfinite(known_length_mm) or known_length_mm <= 0:
-        raise ValueError(f"Invalid bar length: {known_length_mm}")
-    spans = []
-    for ring_index, ring in enumerate(rings):
-        names = [n for n in ring
-                 if n in tracks[primary[0]] and n in tracks[primary[1]]]
-        # Triangulation needs min_inliers consensus views plus one for leverage;
-        # any ring with that much evidence contributes, and thinner support is
-        # visible in the output's support and dispersion fields.
-        if len(names) < BEST_EFFORT_MIN_INLIERS + 1:
-            continue
-        k = min(span, len(names))
-        step = max(1, k // 3)
-        offsets = range(0, len(names), step) if len(names) > k else [0]
-        for offset in offsets:
-            selected = [names[(offset + i) % len(names)] for i in range(k)]
-            separations = [float(np.linalg.norm(
-                tracks[primary[0]][n].xy - tracks[primary[1]][n].xy))
-                for n in selected]
-            gate = max(abs_gate, rel_gate * float(np.median(separations)))
-            points = {}
-            try:
-                for code in primary:
-                    points[code] = triangulate_track(
-                        [tracks[code][n] for n in selected], max_error=gate,
-                        minimum=BEST_EFFORT_MIN_INLIERS, min_consensus=0.5,
-                        min_ray_angle_deg=1.0)
-            except ValueError:
-                continue
-            spans.append({
-                "ring": ring_index, "offset": offset, "views": k,
-                "gate_px": gate,
-                "length_units": float(np.linalg.norm(
-                    np.array(points[primary[0]]["xyz"])
-                    - np.array(points[primary[1]]["xyz"]))),
-                "median_error_px": max(points[code]["median_error_px"]
-                                       for code in primary),
-            })
-    result = {
-        "protocol": "best_effort_scale",
-        "predeclared": {"primary": list(primary), "known_length_mm": known_length_mm,
-                        "span": span, "rel_gate": rel_gate, "abs_gate": abs_gate,
-                        "min_inliers": BEST_EFFORT_MIN_INLIERS},
-        "spans": spans,
-        "support": {"spans": len(spans),
-                    "rings": len({s["ring"] for s in spans})},
-    }
-    if not spans:
-        result["scale_mm_per_model_unit"] = None
-        return result
-    lengths = np.array([s["length_units"] for s in spans])
-    median = float(np.median(lengths))
-    mad = float(np.median(np.abs(lengths - median)))
-    result.update({
-        "scale_mm_per_model_unit": known_length_mm / median,
-        "length_units_median": median,
-        "relative_spread": float((lengths.max() - lengths.min()) / median),
-        "relative_mad": mad / median,
-        "relative_iqr": float((np.quantile(lengths, 0.75)
-                               - np.quantile(lengths, 0.25)) / median),
-    })
     return result
 
 
@@ -452,8 +351,8 @@ def rings_from_exif(scene_dir: Path, image_names: list[str],
     return [sorted(names) for _, names in sorted(groups.items())]
 
 
-def _load_tracks(detections_path: Path, model, codes: tuple[str, ...], *,
-                 allow_unregistered: bool = False) -> dict[str, dict[str, Observation]]:
+def _load_tracks(detections_path: Path, model, codes: tuple[str, ...]
+                 ) -> dict[str, dict[str, Observation]]:
     """Build per-code observation maps from a detections JSON and a reconstruction."""
     import json
 
@@ -461,14 +360,8 @@ def _load_tracks(detections_path: Path, model, codes: tuple[str, ...], *,
     by_name = {image.name: image for image in model.images.values()}
     unregistered = [r["image"] for r in records if r["image"] not in by_name]
     if unregistered:
-        # An unregistered image has no pose, so its detections cannot participate;
-        # dropping it silently would hide an SfM failure, so it is opt-in and logged.
-        if not allow_unregistered:
-            raise ValueError(f"{len(unregistered)} detection images are not registered: "
-                             f"{unregistered[:5]}")
-        logger.warning("Dropping detections from %d unregistered images: %s",
-                       len(unregistered), unregistered[:5])
-        records = [r for r in records if r["image"] in by_name]
+        raise ValueError(f"{len(unregistered)} detection images are not registered: "
+                         f"{unregistered[:5]}")
     tracks: dict[str, dict[str, Observation]] = {code: {} for code in codes}
     for record in records:
         image = by_name[record["image"]]
@@ -508,28 +401,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--primary", required=True, nargs=2, metavar="CODE",
                         help="Detector codes of the primary bar's two targets; the pairing "
                              "of codes to printed labels must be verified on a photograph")
-    parser.add_argument("--check", nargs=2, metavar="CODE",
-                        help="Detector codes of the withheld check bar's two targets; "
-                             "selects the gated two-bar protocol. Omit for single-bar "
-                             "captures, which are estimated best-effort: every short "
-                             "locally rigid span of both-marker views is pooled into a "
-                             "median scale reported with dispersion and support")
-    parser.add_argument("--known-length-mm", type=float, required=True,
-                        help="Printed centre-to-centre distance of each bar, verified on "
-                             "a photograph. Required because the detector codes do not "
-                             "determine the printed length: the same codes appear on bars "
-                             "of different lengths (see docs/bar-codebook.json)")
+    parser.add_argument("--check", required=True, nargs=2, metavar="CODE",
+                        help="Detector codes of the withheld check bar's two targets")
+    parser.add_argument("--known-length-mm", type=float, default=KNOWN_LENGTH_MM,
+                        help="Printed centre-to-centre distance of each bar")
     parser.add_argument("--apply-to", type=Path,
                         help="Mesh in the model's gauge to export in millimetres; only "
                              "written when the scale is accepted")
     parser.add_argument("--output", type=Path,
                         help="Metric mesh path; defaults to <apply-to stem>_mm.ply")
     parser.add_argument("--json-out", type=Path)
-    parser.add_argument("--allow-unregistered", action="store_true",
-                        help="Drop detections on images the model did not register "
-                             "instead of failing; the drop is logged and recorded")
     args = parser.parse_args(argv)
-    two_bar = args.check is not None
 
     model = pycolmap.Reconstruction(str(args.model))
     if not model.is_valid():
@@ -539,70 +421,36 @@ def main(argv: list[str] | None = None) -> int:
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text())
         positions = {Path(entry["image"]).name: entry["position"] for entry in manifest}
-    primary = tuple(args.primary)
-    codes = (*primary, *args.check) if two_bar else primary
-    tracks = _load_tracks(args.detections, model, codes,
-                          allow_unregistered=args.allow_unregistered)
+    bars = BarTargets(primary=tuple(args.primary), check=tuple(args.check))
+    tracks = _load_tracks(args.detections, model, bars.codes())
     # Rings cover every image the detector examined, not only those with accepted
     # detections, so a ring the decoder cannot read appears as recorded failures
     # instead of silently vanishing from the protocol.
     examined = sorted({record["image"]
                        for record in json.loads(args.detections.read_text())})
-    missing_from_scene = [name for name in examined
-                          if not (args.scene / "images" / name).exists()]
-    if missing_from_scene:
-        # Such an image cannot be registered either, so the same opt-in governs it.
-        if not args.allow_unregistered:
-            raise SystemExit(f"{len(missing_from_scene)} detection images are not in "
-                             f"the scene: {missing_from_scene[:5]}")
-        logger.warning("Dropping %d detection images absent from the scene: %s",
-                       len(missing_from_scene), missing_from_scene[:5])
-        examined = [name for name in examined if name not in set(missing_from_scene)]
     rings = rings_from_exif(args.scene, examined, positions)
-    if two_bar:
-        bars = BarTargets(primary=primary, check=tuple(args.check))
-        gates = Gates(known_length_mm=args.known_length_mm)
-        result = sliding_window_scale(tracks, rings, bars, gates)
-    else:
-        result = best_effort_scale(tracks, rings, primary, args.known_length_mm)
+    gates = Gates(known_length_mm=args.known_length_mm)
+    result = sliding_window_scale(tracks, rings, bars, gates)
     result["model"] = str(args.model)
     result["model_sha256"] = model_hashes(args.model)
     result["detections"] = str(args.detections)
-    registered = {image.name for image in model.images.values()}
-    dropped = sorted((set(examined) - registered) | set(missing_from_scene))
-    if dropped:
-        result["unregistered_images_dropped"] = dropped
 
-    if two_bar:
-        checks = result["acceptance_checks"]
-        if result["accepted"]:
-            print(f"ACCEPTED scale {result['scale_mm_per_model_unit']:.4f} mm/unit  "
-                  f"windows {checks['passing_windows']}/{len(result['windows'])}  "
-                  f"rings {checks['distinct_rings']}  "
-                  f"primary spread {checks['primary_relative_spread'] * 100:.2f}%  "
-                  f"check bar max error "
-                  f"{checks['check_bar_relative_error_max'] * 100:.2f}%")
-        else:
-            print(f"REJECTED  windows {checks['passing_windows']}/"
-                  f"{len(result['windows'])}  checks {json.dumps(checks)}")
-            if result.get("note"):
-                print(f"NOTE  {result['note']}")
-        exportable = result["accepted"]
+    checks = result["acceptance_checks"]
+    if result["accepted"]:
+        print(f"ACCEPTED scale {result['scale_mm_per_model_unit']:.4f} mm/unit  "
+              f"windows {checks['passing_windows']}/{len(result['windows'])}  "
+              f"rings {checks['distinct_rings']}  "
+              f"primary spread {checks['primary_relative_spread'] * 100:.2f}%  "
+              f"check bar max error {checks['check_bar_relative_error_max'] * 100:.2f}%")
     else:
-        scale_value = result["scale_mm_per_model_unit"]
-        support = result["support"]
-        if scale_value is None:
-            print("NO ESTIMATE  no span of views triangulated both targets")
-        else:
-            print(f"ESTIMATE scale {scale_value:.4f} mm/unit  "
-                  f"spans {support['spans']}  rings {support['rings']}  "
-                  f"spread {result['relative_spread'] * 100:.2f}%  "
-                  f"mad {result['relative_mad'] * 100:.3f}%")
-        exportable = scale_value is not None
+        print(f"REJECTED  windows {checks['passing_windows']}/{len(result['windows'])}  "
+              f"checks {json.dumps(checks)}")
+        if result.get("note"):
+            print(f"NOTE  {result['note']}")
 
     if args.apply_to:
-        if not exportable:
-            print("No metric mesh exported: no usable scale")
+        if not result["accepted"]:
+            print("No metric mesh exported: the scale was not accepted")
         else:
             output = args.output or args.apply_to.with_name(
                 args.apply_to.stem + "_mm.ply")
@@ -615,7 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps(result, indent=2))
-    return 0 if exportable else 1
+    return 0 if result["accepted"] else 1
 
 
 if __name__ == "__main__":
