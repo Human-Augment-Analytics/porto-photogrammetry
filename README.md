@@ -288,6 +288,11 @@ augenblick sfm colmap \
     --scene /path/to/scene/ \
     --output /output/colmap_masked/
 
+# Optional GLOMAP global mapping with the same masked SIFT and exhaustive matching.
+augenblick sfm glomap \
+    --scene /path/to/scene/ \
+    --output /output/glomap_masked/
+
 # Turntable rig refinement (object on a turntable, static cameras)
 # Takes an existing COLMAP scene and re-solves poses on exact circular orbits.
 augenblick sfm turntable \
@@ -303,6 +308,14 @@ augenblick sfm hull \
     --scene /output/colmap_masked/ \
     --output /output/hull/
 ```
+
+GLOMAP uses `pycolmap.global_mapping` (verified with PyCOLMAP 4.1.1); no separate
+GLOMAP executable is required. It accepts the same `--max_image_size` and
+`--camera_model` options as COLMAP and writes the same `images/`, optional
+`masks/`, and `sparse/0/` scene layout for reconstruction. COLMAP remains the
+incremental option. A PyCOLMAP build without the global-mapping API fails before
+feature extraction rather than falling back to COLMAP. GPU/Ceres acceleration
+depends on the installed PyCOLMAP build.
 
 ### Step 2: Surface Reconstruction
 

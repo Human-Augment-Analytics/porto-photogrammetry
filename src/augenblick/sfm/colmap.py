@@ -29,6 +29,11 @@ class ColmapSfM(SfMMethod):
     name: ClassVar[str] = "colmap"
     config_cls: ClassVar[type] = ColmapConfig
 
+    def _map(self, pycolmap, db_path: str, image_path: str, output_path: str):
+        options = pycolmap.IncrementalPipelineOptions()
+        options.num_threads = len(os.sched_getaffinity(0))
+        return pycolmap.incremental_mapping(db_path, image_path, output_path, options=options)
+
     def run(self, scene: Scene, output_dir: Path) -> SfMResult:
         """Reconstruct the scene and write the largest model to output_dir/sparse/0.
 
@@ -70,40 +75,37 @@ class ColmapSfM(SfMMethod):
         eo.num_threads = n_threads
         mo = pycolmap.FeatureMatchingOptions()
         mo.num_threads = n_threads
-        po = pycolmap.IncrementalPipelineOptions()
-        po.num_threads = n_threads
-        logger.info(f"[colmap] {n_threads} thread(s) per stage")
+        logger.info(f"[{self.name}] {n_threads} thread(s) per stage")
 
         t = time.time()
         pycolmap.extract_features(db_path, str(out_dir / "images"),
                                   camera_mode=pycolmap.CameraMode.PER_IMAGE,
                                   reader_options=ro, extraction_options=eo)
-        logger.info(f"[colmap] extraction {time.time()-t:.0f}s")
+        logger.info(f"[{self.name}] extraction {time.time()-t:.0f}s")
 
         t = time.time()
         pycolmap.match_exhaustive(db_path, matching_options=mo)
-        logger.info(f"[colmap] matching {time.time()-t:.0f}s")
+        logger.info(f"[{self.name}] matching {time.time()-t:.0f}s")
 
         t = time.time()
         maps_dir = out_dir / "sparse"
         maps_dir.mkdir(exist_ok=True)
-        recs = pycolmap.incremental_mapping(db_path, str(out_dir / "images"), str(maps_dir),
-                                            options=po)
-        logger.info(f"[colmap] mapping {time.time()-t:.0f}s -> {len(recs)} model(s)")
+        recs = self._map(pycolmap, db_path, str(out_dir / "images"), str(maps_dir))
+        logger.info(f"[{self.name}] mapping {time.time()-t:.0f}s -> {len(recs)} model(s)")
 
         if not recs:
-            raise SceneError("COLMAP_FAIL: no model reconstructed")
+            raise SceneError(f"{self.name.upper()}_FAIL: no model reconstructed")
 
         best_id = max(recs, key=lambda k: recs[k].num_reg_images())
         best = recs[best_id]
-        logger.info(f"[colmap] best model {best_id}: {best.num_reg_images()} images, "
+        logger.info(f"[{self.name}] best model {best_id}: {best.num_reg_images()} images, "
                     f"{best.num_points3D()} points")
 
         final = maps_dir / "0"
         final.mkdir(exist_ok=True)
         best.write(str(final))
         elapsed = time.time() - t0
-        logger.info(f"COLMAP_DONE {best.num_reg_images()}img {best.num_points3D()}pts "
+        logger.info(f"{self.name.upper()}_DONE {best.num_reg_images()}img {best.num_points3D()}pts "
                     f"in {elapsed:.0f}s -> {out_dir}")
 
         return SfMResult(
