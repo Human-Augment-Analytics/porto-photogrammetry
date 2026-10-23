@@ -46,8 +46,10 @@ def test_missing_name_lists_available(empty_registry):
 
 
 def test_real_registries_populated():
+    import augenblick.preparation  # noqa: F401
     import augenblick.reconstruction  # noqa: F401
     import augenblick.sfm  # noqa: F401
 
     assert set(registry.RECONSTRUCTION_REGISTRY) == {"2dgs", "sugar", "pgsr", "gw", "geosvr", "milo"}
     assert set(registry.SFM_REGISTRY) == {"vggt", "colmap", "glomap", "turntable", "hull", "dvlt"}
+    assert set(registry.PREPARATION_REGISTRY) == {"color"}

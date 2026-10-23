@@ -33,7 +33,7 @@ class Method(ABC, Generic[Input]):
     """Base for any pipeline stage that transforms an input directory.
 
     Subclasses set `name` and `config_cls`, then implement `run`. Registration is
-    performed by the register_sfm / register_reconstruction / register_mask decorators.
+    performed by the stage-specific registry decorators.
     The input type varies by stage: sfm/recon take a Scene, mask takes a raw images dir.
     A mixin (SceneInputMixin / ImagesInputMixin) supplies build_input + validate.
     """

@@ -6,11 +6,16 @@ import json
 import logging
 import re
 import shutil
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from augenblick.core.errors import SceneError
+from augenblick.core.registry import register_preparation
+from augenblick.preparation.base import PreparationMethod, PreparationResult
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +25,7 @@ PATCH_ROWS = 4
 PATCH_COLUMNS = 6
 
 
-class ColorCalibrationError(ValueError):
+class ColorCalibrationError(SceneError):
     """The chart configuration or source images cannot produce a safe transform."""
 
 
@@ -44,6 +49,17 @@ class CalibrationConfig:
     target_name: str | None = None
     mask_clipping_warning_percent: float = 1.0
     mask_clipping_max_increase_percent: float = 0.5
+
+
+@dataclass(frozen=True)
+class ColorCalibrationConfig:
+    """Command-line settings for the colour calibration preparation method."""
+
+    config: Path = field(metadata={"help": "Chart configuration JSON"})
+    overwrite: bool = field(
+        default=False,
+        metadata={"help": "Allow writes into a non-empty output directory"},
+    )
 
 
 def srgb_to_linear(values: np.ndarray) -> np.ndarray:
@@ -609,3 +625,43 @@ def calibrate_directory(
     report_path.write_text(json.dumps(report, indent=2))
     logger.info("Wrote colour calibration report to %s", report_path)
     return report
+
+
+@register_preparation
+class ColorCalibration(PreparationMethod):
+    """Calibrate an image tree from one chart image for each camera."""
+
+    name = "color"
+    config_cls = ColorCalibrationConfig
+
+    def run(self, input_dir: Path, output_dir: Path) -> PreparationResult:
+        """Calibrate the input images and return the generated report path."""
+        self.validate(input_dir)
+        input_dir = input_dir.resolve()
+        output_dir = output_dir.resolve()
+        try:
+            calibration = load_config(self.config.config.resolve())
+            started = time.time()
+            report = calibrate_directory(
+                input_dir,
+                output_dir,
+                calibration,
+                overwrite=self.config.overwrite,
+            )
+        except ColorCalibrationError:
+            raise
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SceneError(str(exc)) from exc
+
+        report_path = output_dir / "color_calibration_report.json"
+        processed = report.get("processed_images", {})
+        return PreparationResult(
+            output_dir=output_dir,
+            elapsed=time.time() - started,
+            num_images=sum(int(count) for count in processed.values()),
+            report_path=report_path,
+            details={
+                "processed_images": processed,
+                "calibration_mode": report.get("calibration_mode"),
+            },
+        )

@@ -252,7 +252,7 @@ or provide reviewed corners ordered top-left, top-right, bottom-right, bottom-le
 see `examples/color/uf_herp_3998.json`.
 
 ```bash
-augenblick color \
+augenblick prepare color \
     --input /path/to/UF_Herp_3998/images \
     --output /path/to/UF_Herp_3998/calibrated \
     --config examples/color/uf_herp_3998.json

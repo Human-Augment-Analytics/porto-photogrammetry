@@ -1,7 +1,6 @@
 """Command-line entry point for preparation, masking, SfM, and reconstruction stages."""
 import argparse
 import importlib
-import json
 import logging
 import sys
 from pathlib import Path
@@ -11,17 +10,14 @@ from augenblick.core.config import add_dataclass_arguments
 from augenblick.core.errors import BackendError, MethodNotFound, SceneError
 from augenblick.core.registry import (
     MASK_REGISTRY,
+    PREPARATION_REGISTRY,
     RECONSTRUCTION_REGISTRY,
     SFM_REGISTRY,
     get_method,
 )
-from augenblick.preparation.color import (
-    ColorCalibrationError,
-    calibrate_directory,
-    load_config,
-)
 
 logger = logging.getLogger(__name__)
+
 
 class Stage(NamedTuple):
     """What the CLI needs to build and resolve one stage."""
@@ -35,6 +31,8 @@ class Stage(NamedTuple):
 
 # One entry per stage; adding a stage is one edit here.
 STAGES: dict[str, Stage] = {
+    "prepare": Stage(PREPARATION_REGISTRY, "preparation", "Prepare raw input data",
+                     "--input", "Input image tree"),
     "mask": Stage(MASK_REGISTRY, "mask", "Run a masking method",
                   "--images", "Input directory of .jpg/.JPG/.jpeg photographs"),
     "sfm": Stage(SFM_REGISTRY, "SfM", "Run an SfM method",
@@ -61,6 +59,7 @@ def _add_stage_parser(subparsers, stage_name: str, stage: Stage):
 
 def build_parser(include_backends: bool = True) -> argparse.ArgumentParser:
     """Build the CLI parser, optionally loading GPU/backend dependencies."""
+    importlib.import_module("augenblick.preparation")
     if include_backends:
         # Importing these packages populates the method registries.
         importlib.import_module("augenblick.masking")
@@ -71,14 +70,9 @@ def build_parser(include_backends: bool = True) -> argparse.ArgumentParser:
         description="Masking, SfM initialisation, and Gaussian-primitive surface reconstruction.",
     )
     subparsers = parser.add_subparsers(dest="stage")
-    if include_backends:
-        for name, stage in STAGES.items():
-            _add_stage_parser(subparsers, name, stage)
-    color = subparsers.add_parser("color", help="Calibrate image colours by camera")
-    color.add_argument("--input", type=Path, required=True, help="Input image tree")
-    color.add_argument("--output", type=Path, required=True, help="Calibrated output tree")
-    color.add_argument("--config", type=Path, required=True, help="Chart configuration JSON")
-    color.add_argument("--overwrite", action="store_true", help="Allow writes into a non-empty output")
+    stages = STAGES if include_backends else {"prepare": STAGES["prepare"]}
+    for name, stage in stages.items():
+        _add_stage_parser(subparsers, name, stage)
     return parser
 
 
@@ -101,35 +95,13 @@ def main(argv: list[str] | None = None) -> int:
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    parser = build_parser(include_backends=raw_argv[:1] != ["color"])
+    parser = build_parser(include_backends=raw_argv[:1] != ["prepare"])
     # GW forwards unknown flags to its training step, so parse leniently and gate below.
     args, extras = parser.parse_known_args(raw_argv)
 
     if args.stage is None:
         parser.print_help()
         return 2
-
-    if args.stage == "color":
-        if extras:
-            logger.error(f"unrecognised arguments: {' '.join(extras)}")
-            return 2
-        try:
-            config = load_config(args.config.resolve())
-            report = calibrate_directory(
-                args.input.resolve(),
-                args.output.resolve(),
-                config,
-                overwrite=args.overwrite,
-            )
-        except (ColorCalibrationError, OSError, json.JSONDecodeError) as exc:
-            logger.error(str(exc))
-            return 2
-        logger.info(
-            "Colour calibration complete: %s",
-            args.output.resolve() / "color_calibration_report.json",
-        )
-        logger.info("Processed images by camera: %s", report["processed_images"])
-        return 0
 
     stage = STAGES[args.stage]
     if getattr(args, "list", False):

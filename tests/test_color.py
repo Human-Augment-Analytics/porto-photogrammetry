@@ -7,9 +7,13 @@ import cv2
 import numpy as np
 import pytest
 
+from augenblick.cli.main import build_parser, main
+from augenblick.preparation.base import PreparationMethod, PreparationResult
 from augenblick.preparation.color import (
     CalibrationConfig,
     CameraChart,
+    ColorCalibration,
+    ColorCalibrationConfig,
     ColorCalibrationError,
     apply_color_matrix,
     calibrate_directory,
@@ -264,3 +268,80 @@ def test_report_values_are_json_serializable():
         np.full((24, 3), 0.4, np.float32),
     )
     json.dumps({"matrix": matrix.tolist()})
+
+
+def test_color_calibration_is_a_registered_preparation_method():
+    assert issubclass(ColorCalibration, PreparationMethod)
+    args = build_parser(include_backends=False).parse_args(
+        [
+            "prepare",
+            "color",
+            "--input",
+            "raw",
+            "--output",
+            "calibrated",
+            "--config",
+            "chart.json",
+            "--overwrite",
+        ]
+    )
+    assert args.stage == "prepare"
+    assert args.method == "color"
+    assert args.config == Path("chart.json")
+    assert args.overwrite is True
+
+
+def test_color_calibration_config_is_required():
+    parser = build_parser(include_backends=False)
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["prepare", "color", "--input", "raw", "--output", "calibrated"]
+        )
+
+
+def test_color_calibration_method_returns_preparation_result(tmp_path):
+    chart = synthetic_chart()
+    reference = tmp_path / "camera1_ref.png"
+    capture = tmp_path / "camera1_capture.png"
+    cv2.imwrite(str(reference), chart)
+    cv2.imwrite(str(capture), chart)
+    config_path = tmp_path / "chart.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "reference_camera": "camera1",
+                "cameras": {
+                    "camera1": {
+                        "reference_image": reference.name,
+                        "corners": [[0, 0], [599, 0], [599, 399], [0, 399]],
+                    }
+                },
+            }
+        )
+    )
+    output = tmp_path.parent / f"{tmp_path.name}_method_output"
+
+    result = ColorCalibration(ColorCalibrationConfig(config=config_path)).run(
+        tmp_path, output
+    )
+
+    assert isinstance(result, PreparationResult)
+    assert result.output_dir == output.resolve()
+    assert result.num_images == 1
+    assert result.report_path == output.resolve() / "color_calibration_report.json"
+    assert result.report_path.is_file()
+
+    cli_output = tmp_path.parent / f"{tmp_path.name}_cli_output"
+    assert main(
+        [
+            "prepare",
+            "color",
+            "--input",
+            str(tmp_path),
+            "--output",
+            str(cli_output),
+            "--config",
+            str(config_path),
+        ]
+    ) == 0
+    assert (cli_output / "color_calibration_report.json").is_file()
