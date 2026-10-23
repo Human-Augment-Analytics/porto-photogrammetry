@@ -15,6 +15,7 @@ from augenblick.preparation.color import (
     ColorCalibration,
     ColorCalibrationConfig,
     ColorCalibrationError,
+    XRITE_CLASSIC_AFTER_NOV2014_SRGB_D65,
     apply_color_matrix,
     calibrate_directory,
     detect_chart_corners,
@@ -176,6 +177,75 @@ def test_absolute_target_requires_named_24_patch_srgb_values(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(ColorCalibrationError, match="normalized"):
         load_config(path)
+
+
+def test_xrite_post_2014_preset_supports_rotated_nano_chart(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "reference_camera": "camera1",
+                "cameras": {
+                    "camera1": {
+                        "reference_image": "camera1_ref.png",
+                        "corners": [[0, 0], [10, 0], [10, 10], [0, 10]],
+                    }
+                },
+                "target_preset": "xrite_colorchecker_classic_after_nov2014",
+                "target_rotation_degrees": 180,
+            }
+        )
+    )
+
+    config = load_config(path)
+
+    assert config.target_preset == "xrite_colorchecker_classic_after_nov2014"
+    assert config.target_rotation_degrees == 180
+    assert config.target_name.startswith("X-Rite ColorChecker Classic")
+    assert np.allclose(
+        config.target_srgb_d65,
+        XRITE_CLASSIC_AFTER_NOV2014_SRGB_D65[::-1],
+    )
+
+
+def test_target_preset_rejects_unknown_name_and_conflicting_values(tmp_path):
+    path = tmp_path / "config.json"
+    base = {
+        "reference_camera": "camera1",
+        "cameras": {
+            "camera1": {
+                "reference_image": "camera1_ref.png",
+                "corners": [[0, 0], [10, 0], [10, 10], [0, 10]],
+            }
+        },
+    }
+    path.write_text(json.dumps({**base, "target_preset": "unknown"}))
+    with pytest.raises(ColorCalibrationError, match="unknown target_preset"):
+        load_config(path)
+
+    path.write_text(
+        json.dumps(
+            {
+                **base,
+                "target_preset": "xrite_colorchecker_classic_after_nov2014",
+                "target_srgb_d65": [[0.5, 0.5, 0.5]] * 24,
+                "target_name": "conflict",
+            }
+        )
+    )
+    with pytest.raises(ColorCalibrationError, match="either"):
+        load_config(path)
+
+    path.write_text(json.dumps({**base, "target_rotation_degrees": 180}))
+    with pytest.raises(ColorCalibrationError, match="only with target_preset"):
+        load_config(path)
+
+
+def test_project_nano_config_selects_absolute_preset():
+    config = load_config(Path("examples/color/uf_herp_3998.json"))
+    assert config.target_preset == "xrite_colorchecker_classic_after_nov2014"
+    assert config.target_rotation_degrees == 180
+    assert config.target_srgb_d65.shape == (24, 3)
 
 
 def test_output_cannot_be_inside_input(tmp_path):

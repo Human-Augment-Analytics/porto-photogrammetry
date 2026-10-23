@@ -24,6 +24,48 @@ RECTIFIED_SIZE = (600, 400)
 PATCH_ROWS = 4
 PATCH_COLUMNS = 6
 
+# X-Rite ColorChecker24 November 2014 edition and newer. The manufacturer CGATS
+# values are M0 CIELAB under D50. They were converted to D65 with Bradford
+# chromatic adaptation and then encoded as sRGB. The array uses the standard
+# chart orientation in row-major order: A1..F1, A2..F2, A3..F3, A4..F4.
+XRITE_CLASSIC_AFTER_NOV2014_SRGB_D65 = np.asarray(
+    [
+        [0.45373704, 0.31097244, 0.25489168],
+        [0.77345390, 0.56335501, 0.49658435],
+        [0.35616184, 0.47186553, 0.60881112],
+        [0.35870660, 0.42458612, 0.24990555],
+        [0.51421151, 0.49823104, 0.68465328],
+        [0.37384185, 0.74024598, 0.67346693],
+        [0.87871543, 0.48690933, 0.18931248],
+        [0.26879578, 0.35117577, 0.65590737],
+        [0.77367406, 0.31356576, 0.37278500],
+        [0.36423718, 0.22657759, 0.40743131],
+        [0.61201858, 0.73363634, 0.22825647],
+        [0.89169581, 0.63257789, 0.15364873],
+        [0.15571711, 0.24148731, 0.56952338],
+        [0.23760143, 0.57672844, 0.27503549],
+        [0.69874295, 0.21025840, 0.22249719],
+        [0.92691397, 0.78238398, 0.05775781],
+        [0.74990017, 0.30905216, 0.57424765],
+        [0.00000000, 0.52066702, 0.64777729],
+        [0.94505435, 0.94765432, 0.92327005],
+        [0.78848475, 0.79308242, 0.78847587],
+        [0.63240885, 0.63986673, 0.63843608],
+        [0.47322936, 0.47412259, 0.47290459],
+        [0.32444102, 0.32955595, 0.33147872],
+        [0.19429239, 0.19476109, 0.19747202],
+    ],
+    dtype=np.float32,
+)
+
+COLOR_TARGET_PRESETS = {
+    "xrite_colorchecker_classic_after_nov2014": (
+        XRITE_CLASSIC_AFTER_NOV2014_SRGB_D65,
+        "X-Rite ColorChecker Classic November 2014 edition and newer; "
+        "manufacturer M0 Lab D50 converted to sRGB D65 with Bradford adaptation",
+    )
+}
+
 
 class ColorCalibrationError(SceneError):
     """The chart configuration or source images cannot produce a safe transform."""
@@ -47,6 +89,8 @@ class CalibrationConfig:
     ridge: float = 1e-6
     target_srgb_d65: np.ndarray | None = None
     target_name: str | None = None
+    target_preset: str | None = None
+    target_rotation_degrees: int = 0
     mask_clipping_warning_percent: float = 1.0
     mask_clipping_max_increase_percent: float = 0.5
 
@@ -120,8 +164,32 @@ def load_config(path: Path) -> CalibrationConfig:
         raise ColorCalibrationError("mask clipping thresholds must be non-negative")
 
     target_data = data.get("target_srgb_d65")
+    target_preset = data.get("target_preset")
+    target_rotation_degrees = int(data.get("target_rotation_degrees", 0))
     target_srgb_d65 = None
     target_name = data.get("target_name")
+    if target_data is not None and target_preset is not None:
+        raise ColorCalibrationError(
+            "use either target_srgb_d65 or target_preset, not both"
+        )
+    if target_rotation_degrees not in {0, 180}:
+        raise ColorCalibrationError("target_rotation_degrees must be 0 or 180")
+    if target_rotation_degrees and target_preset is None:
+        raise ColorCalibrationError(
+            "target_rotation_degrees is supported only with target_preset"
+        )
+    if target_preset is not None:
+        try:
+            preset_values, preset_name = COLOR_TARGET_PRESETS[target_preset]
+        except KeyError:
+            available = ", ".join(sorted(COLOR_TARGET_PRESETS))
+            raise ColorCalibrationError(
+                f"unknown target_preset {target_preset!r}; available: {available}"
+            ) from None
+        target_srgb_d65 = preset_values.copy()
+        if target_rotation_degrees == 180:
+            target_srgb_d65 = target_srgb_d65[::-1].copy()
+        target_name = preset_name
     if target_data is not None:
         target_srgb_d65 = np.asarray(target_data, dtype=np.float32)
         if target_srgb_d65.shape != (PATCH_ROWS * PATCH_COLUMNS, 3):
@@ -135,7 +203,7 @@ def load_config(path: Path) -> CalibrationConfig:
                 "target_name is required when target_srgb_d65 is provided"
             )
         target_name = target_name.strip()
-    elif target_name is not None:
+    elif target_preset is None and target_name is not None:
         raise ColorCalibrationError("target_name requires target_srgb_d65")
 
     return CalibrationConfig(
@@ -145,6 +213,8 @@ def load_config(path: Path) -> CalibrationConfig:
         ridge=ridge,
         target_srgb_d65=target_srgb_d65,
         target_name=target_name,
+        target_preset=target_preset,
+        target_rotation_degrees=target_rotation_degrees,
         mask_clipping_warning_percent=mask_clipping_warning_percent,
         mask_clipping_max_increase_percent=mask_clipping_max_increase_percent,
     )
@@ -603,6 +673,8 @@ def calibrate_directory(
     report = {
         "calibration_mode": calibration_mode,
         "target_name": config.target_name,
+        "target_preset": config.target_preset,
+        "target_rotation_degrees": config.target_rotation_degrees,
         "reference_camera": config.reference_camera,
         "camera_regex": config.camera_regex,
         "ridge": config.ridge,

@@ -4,6 +4,8 @@
   "ridge": 1e-6,
   "mask_clipping_warning_percent": 1.0,
   "mask_clipping_max_increase_percent": 0.5,
+  "target_preset": "xrite_colorchecker_classic_after_nov2014",
+  "target_rotation_degrees": 180,
   "cameras": {
     "camera1": {
       "reference_image": "camera1_IMG_9401.JPG",

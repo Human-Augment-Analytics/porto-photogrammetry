@@ -270,11 +270,15 @@ points. These are conservative operational review thresholds, not universal biol
 limits; override them with `mask_clipping_warning_percent` and
 `mask_clipping_max_increase_percent` when a study establishes different tolerances.
 
-By default, calibration is relative to `reference_camera`. Absolute calibration is enabled only
-when the configuration supplies all 24 normalized sRGB-D65 patch values as
-`target_srgb_d65` and a non-empty provenance label as `target_name`. Values are ordered
-row-major in the same orientation as the rectified chart. Do not use generic ColorChecker
-values unless the physical chart model and value edition have been verified.
+By default, calibration is relative to `reference_camera`. Absolute calibration is enabled when
+the configuration supplies all 24 normalized sRGB-D65 patch values as `target_srgb_d65` and a
+non-empty provenance label as `target_name`. The built-in
+`xrite_colorchecker_classic_after_nov2014` preset uses X-Rite's post-November-2014 reference
+data and is appropriate for the ColorChecker Classic Nano, which was introduced in 2019. Set
+`target_rotation_degrees` to `180` when the chart appears upside down, as it does in the
+UF_Herp_3998 reference frames. Explicit values are ordered row-major in the same orientation as
+the rectified chart. Do not use generic ColorChecker values unless the physical chart model and
+value edition have been verified.
 
 ### Step 0.75: Masking
 
