@@ -358,10 +358,25 @@ augenblick recon pgsr --scene <sfm> --output /output/pgsr_eval/ --eval -r 2
 augenblick recon gw   --scene <sfm> --output /output/gw_eval/   --eval -r 2
 ```
 
-Each run writes `<output>/nvs_metrics.json` holding masked PSNR, SSIM and LPIPS averaged over
+Each run writes `<output>/nvs_metrics.json` holding PSNR, SSIM, LPIPS and DISTS averaged over
 the held-out views, plus a per-view breakdown. Both the render and the photograph are masked to
 the specimen before scoring, because these are masked turntable captures where scoring the
 background would mostly reward reproducing the black surround.
+
+PSNR and SSIM are reduced over specimen-mask pixels. LPIPS and DISTS use the
+same tight specimen bounding-box crop after masking, without an additional
+resize; DISTS receives RGB in `[0, 1]`. Lower LPIPS/DISTS means greater
+reference similarity. DISTS is complementary structure/texture similarity,
+not proof of human preference, texture-only quality, or geometric accuracy.
+New reports contain a `dists` field per view and at the top level; existing
+metrics and scores are unchanged. GPU scoring retries on CPU if a view runs
+out of CUDA memory.
+
+Install the updated requirements (`dists-pytorch==0.1`) before rescoring.
+The upstream package loads learned DISTS weights from the active Python
+environment's `weights.pt` and uses pretrained torchvision VGG16 weights.
+Ensure these are installed/cached before running on an offline compute node;
+use the same environment for installation and scoring.
 
 The held-out set is fixed by `<scene>/split.json`, which the first `--eval` run writes by
 holding out every 8th registered image. Every backend reads that file in preference to its own
