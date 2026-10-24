@@ -84,7 +84,10 @@ via `get_mesh_path()` / `get_textured_mesh_path()`.
 | `diff-gaussian-rasterization-sof` | SOF transmittance rasterizer | Only `--sdf_mode exact_computation` / `--milo` |
 
 `setup_common.sh` builds the first four plus `tetra_triangulation` (skippable with
-`SKIP_TETRA=1`). RaDe-GS, SOF, and Depth-Anything-V2 are **not** built in the canonical install;
+`SKIP_TETRA=1`). **MILo reuses three of these builds** — `diff-gaussian-rasterization-ms`,
+`fused-ssim` and `tetra_triangulation` (MILo's copies are the same code without our compat
+edits) — so a change or fix here applies to both backends, and `SKIP_TETRA=1` disables MILo too
+([backend-milo.md](backend-milo.md)). RaDe-GS, SOF, and Depth-Anything-V2 are **not** built in the canonical install;
 their imports are `try/except`-guarded or behind `if args.rasterizer == "radegs":`, so this is
 safe on the `ours` path.
 

@@ -1,6 +1,6 @@
 # Reconstruction Backends (`augenblick recon`)
 
-Five backends, each taking `--scene` and `--output`, orchestrating the underlying `src/libs/`
+Six backends, each taking `--scene` and `--output`, orchestrating the underlying `src/libs/`
 train + render scripts via `subprocess.run()` with a banner + per-stage + total-time summary.
 They are `SubprocessBackend` subclasses; the class machinery is documented in
 [augenblick-package.md](augenblick-package.md).
@@ -51,11 +51,20 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
     [--white_background] [--tsdf fixed|auto] [--radius_scale 2.0] \
     [--voxel_size 0.001] [--max_depth 5.0] [--sdf_trunc_scale 4.0] \
     [--num_cluster 1] [--use_depth_filter] [-r -1] [--eval]
+
+# MILo: Gaussians with a Delaunay mesh extracted inside training → SDF-refined mesh
+augenblick recon milo --scene <scene_dir> --output <output_dir> \
+    [--densification regular|fast] [--iterations] [--densify_until_iter] \
+    [--regularization_from_iter] [--mesh_config <name|path.yaml>] [--rasterizer radegs|gof] \
+    [--imp_metric indoor|outdoor] [--dense_gaussians] [--decoupled_appearance] \
+    [--lambda_mask 0.1] [--white_background] [--extract sdf|tsdf] [--refine_iter 1000] \
+    [--remove_oof_vertices] [--mesh_res 4096] [--num_cluster 50] [-r -1] [--eval]
 ```
 
 ## Wrapper-specific behaviour
 
-- **SuGaR / 2DGS / PGSR / GeoSVR** set `cwd` to the backend source dir (`use_cwd = True`).
+- **SuGaR / 2DGS / PGSR / GeoSVR / MILo** set `cwd` to the backend source dir (`use_cwd = True`;
+  MILo's is `src/libs/milo/milo/`).
 - **`-r` / `--eval`** come from the shared `ResolutionParams` / `EvalParams` mixins on every
   backend except SuGaR. `-r -1` caps the long side at 1600 px (GeoSVR maps it onto its own
   `res_downscale`); `--eval` writes or reuses `split.json` and scores held-out views at the end
@@ -74,6 +83,12 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
   `argparse.BooleanOptionalAction`, hence the `--no-postprocess` / `--no-filter_large_edges`
   spellings (both default on).
 - **GeoSVR** reads the scene in place (no `prepare()`) and writes nothing outside the output dir. It loads a yacs preset (`cfg/dtu_mesh.yaml`), then overrides it with explicit flags, every bool as `--x`/`--no-x`; vendored patches make flags reliably beat the preset. `--lambda_mask` (default 0.5) requires a mask for every image, checked in `validate()`. Default choices: [backend-geosvr.md](backend-geosvr.md). Held-out renders land in `test/ours_<iter>_r<res_downscale>/`, which `find_test_dir` accepts.
+- **MILo** reads the scene in place and writes nothing outside the output dir. One field,
+  `--densification`, picks the trainer script (`regular` = upstream's object-centric recipe,
+  30k; `fast` = the paper's, 18k); the iteration count and mesh config it implies are passed to
+  training **and** extraction, which must agree. `--lambda_mask` (default 0.1) needs RaDe-GS and
+  a mask per registered image, both checked in `validate()`, as is the `tetranerf` build.
+  Details: [backend-milo.md](backend-milo.md).
 
 ## Output locations
 
@@ -84,7 +99,8 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
 | PGSR | triangle mesh | `<model>/mesh/tsdf_fusion_post.ply` |
 | GeoSVR | triangle mesh | `<model>/mesh/tsdf/tsdf_fusion_post.ply` |
 | GW | raw / post / textured mesh | `<output>/mesh_ours_2pivots{,_post,_post_texture_refined_<iter-1>}.ply` |
+| MILo | Delaunay SDF mesh (`sdf`) / TSDF mesh (`tsdf`) | `<output>/mesh_learnable_sdf.ply` / `<output>/mesh_regular_tsdf_res<mesh_res>_post.ply` |
 
 Per-backend internals: [backend-sugar.md](backend-sugar.md), [backend-2dgs.md](backend-2dgs.md),
 [backend-pgsr.md](backend-pgsr.md), [backend-gaussian-wrapping.md](backend-gaussian-wrapping.md),
-[backend-geosvr.md](backend-geosvr.md).
+[backend-geosvr.md](backend-geosvr.md), [backend-milo.md](backend-milo.md).

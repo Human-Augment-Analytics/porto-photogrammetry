@@ -2,7 +2,7 @@
 # Shared installer behind the per-GPU wrappers (setup_l40s/a100/b200.sh, auto_setup.sh).
 # Wrappers must export: GPU_LABEL, GPU_ARCH, CUDA_MODULE, TORCH_SPEC, TORCH_INDEX_URL,
 # NUMPY_GENERATION (1 or 2, matching the torch wheel's numpy C-ABI).
-# Optional: BACKENDS (default "sugar 2dgs pgsr gw geosvr"), SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
+# Optional: BACKENDS (default "sugar 2dgs pgsr gw geosvr milo"), SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
 set -euo pipefail
 
 : "${GPU_LABEL:?set by wrapper}"
@@ -11,7 +11,7 @@ set -euo pipefail
 : "${TORCH_SPEC:?set by wrapper}"
 : "${TORCH_INDEX_URL:?set by wrapper}"
 : "${NUMPY_GENERATION:?set by wrapper}"
-BACKENDS="${BACKENDS:-sugar 2dgs pgsr gw geosvr}"
+BACKENDS="${BACKENDS:-sugar 2dgs pgsr gw geosvr milo}"
 SKIP_TETRA="${SKIP_TETRA:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -119,9 +119,23 @@ case " $BACKENDS " in *" gw "*)
     build src/libs/gaussian_wrapping/submodules/warp-patch-ncc
     ;;
 esac
+# MILo: its own RaDe-GS (renamed so it cannot replace SuGaR's diff_gaussian_rasterization) and
+# GOF rasterisers, plus the SuGaR/GW extensions it shares, when those backends are not selected.
+case " $BACKENDS " in *" milo "*)
+    build src/libs/milo/submodules/diff-gaussian-rasterization-radegs
+    build src/libs/milo/submodules/diff-gaussian-rasterization_gof
+    case " $BACKENDS " in *" sugar "*) ;; *)
+        build src/libs/sugar/gaussian_splatting/submodules/simple-knn ;;
+    esac
+    case " $BACKENDS " in *" gw "*) ;; *)
+        build src/libs/gaussian_wrapping/submodules/diff-gaussian-rasterization-ms
+        build src/libs/gaussian_wrapping/submodules/fused-ssim ;;
+    esac
+    ;;
+esac
 
-# --- 8. Gaussian Wrapping: CGAL / tetra_triangulation (fragile, optional) -----
-case " $BACKENDS " in *" gw "*)
+# --- 8. CGAL / tetra_triangulation (GW pivot extraction, MILo's Delaunay; fragile) ---
+case " $BACKENDS " in *" gw "*|*" milo "*)
     if [ "$SKIP_TETRA" = "1" ]; then
         echo "Skipping tetra_triangulation (SKIP_TETRA=1)."
     else
@@ -141,7 +155,7 @@ case " $BACKENDS " in *" gw "*)
                   -DTorch_DIR="$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share/cmake/Torch'))")" \
           && make \
           && python -m pip install -e . --no-build-isolation
-        ) || echo "WARN: tetra_triangulation build failed (GW pivot extraction unavailable; other backends fine)."
+        ) || echo "WARN: tetra_triangulation build failed (GW pivot extraction and MILo unavailable; other backends fine)."
     fi
     ;;
 esac
@@ -178,6 +192,9 @@ checks = {
     "simple_knn._C": "simple_knn (SuGaR/3DGS)",
     "diff_surfel_rasterization": "diff_surfel_rasterization (2DGS)",
     "diff_plane_rasterization": "diff_plane_rasterization (PGSR)",
+    "diff_gaussian_rasterization_radegs": "diff_gaussian_rasterization_radegs (MILo)",
+    "diff_gaussian_rasterization_gof": "diff_gaussian_rasterization_gof (MILo)",
+    "tetranerf.utils.extension": "tetranerf (GW/MILo)",
 }
 ok, miss = [], []
 for mod, label in checks.items():

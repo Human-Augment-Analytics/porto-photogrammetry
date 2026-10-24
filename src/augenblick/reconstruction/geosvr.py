@@ -5,12 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from augenblick.core.errors import SceneError
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.eval.split import registered_stems
 from augenblick.reconstruction.base import (
-    LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend)
+    LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend, require_registered_masks)
 
 logger = logging.getLogger(__name__)
 
@@ -86,17 +84,7 @@ class GeosvrBackend(SubprocessBackend):
             SceneError: If lambda_mask > 0 and any registered image lacks masks/<stem>.png.
         """
         super().validate(scene)
-        if self.config.lambda_mask <= 0:
-            return
-        # Upstream reads cam.mask unguarded, so one unmasked view would crash training mid-run.
-        # Only registered images are loaded: masked COLMAP drops unmasked ones from the model.
-        stems = registered_stems(scene.model_dir)
-        missing = [s for s in stems if not (scene.masks_dir / f"{s}.png").is_file()]
-        if missing:
-            raise SceneError(
-                f"lambda_mask={self.config.lambda_mask} needs a mask per registered image, but "
-                f"{len(missing)} of {len(stems)} lack masks/<stem>.png (e.g. {missing[:5]}); "
-                "pass --lambda_mask 0 to train without it")
+        require_registered_masks(scene, self.config.lambda_mask)
 
     def res_downscale(self, scene: Scene) -> float:
         """Map -r onto GeoSVR's res_downscale, matching the other backends' long-side cap."""

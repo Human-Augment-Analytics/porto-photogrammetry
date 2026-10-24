@@ -12,9 +12,14 @@ from PIL import Image
 
 from augenblick.core.errors import SceneError
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, REPO_ROOT
+from augenblick.reconstruction.base import LIBS_DIR, REPO_ROOT, require_registered_masks
 from augenblick.reconstruction.geosvr import GeosvrBackend, GeosvrConfig
 from augenblick.reconstruction.gw import GWBackend, GWConfig
+from augenblick.reconstruction.milo import (
+    RENDER_SCRIPT as MILO_RENDER_SCRIPT, SDF_SCRIPT as MILO_SDF_SCRIPT,
+    TRAIN_FAST_SCRIPT as MILO_TRAIN_FAST_SCRIPT,
+    TRAIN_REGULAR_SCRIPT as MILO_TRAIN_REGULAR_SCRIPT, TSDF_SCRIPT as MILO_TSDF_SCRIPT,
+    MiloBackend, MiloConfig)
 from augenblick.reconstruction.pgsr import PgsrBackend, PgsrConfig
 from augenblick.reconstruction.sugar import SugarBackend, SugarConfig
 from augenblick.reconstruction.twodgs import TwoDGSBackend, TwoDGSConfig
@@ -466,7 +471,7 @@ def test_geosvr_patches_present():
 
 def test_geosvr_mask_loss_requires_every_mask(tmp_path, monkeypatch):
     scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
-    monkeypatch.setattr("augenblick.reconstruction.geosvr.registered_stems", lambda _: ["a", "b"])
+    monkeypatch.setattr("augenblick.reconstruction.base.registered_stems", lambda _: ["a", "b"])
     with pytest.raises(SceneError, match="lambda_mask"):
         GeosvrBackend(GeosvrConfig()).validate(scene)
     GeosvrBackend(GeosvrConfig(lambda_mask=0.0)).validate(scene)
@@ -475,7 +480,7 @@ def test_geosvr_mask_loss_requires_every_mask(tmp_path, monkeypatch):
 def test_geosvr_mask_loss_ignores_unregistered_images(tmp_path, monkeypatch):
     # Masked COLMAP drops unmasked images from the model, and GeoSVR never loads them.
     scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
-    monkeypatch.setattr("augenblick.reconstruction.geosvr.registered_stems", lambda _: ["a"])
+    monkeypatch.setattr("augenblick.reconstruction.base.registered_stems", lambda _: ["a"])
     GeosvrBackend(GeosvrConfig()).validate(scene)
 
 
@@ -483,3 +488,213 @@ def test_geosvr_resolution_maps_long_side(tmp_path):
     scene = _geosvr_scene(tmp_path / "scene", size=(4000, 3000))
     assert GeosvrBackend(GeosvrConfig()).res_downscale(scene) == 2.5
     assert GeosvrBackend(GeosvrConfig(resolution=2)).res_downscale(scene) == 2.0
+
+
+MILO = LIBS_DIR / "milo" / "milo"
+
+
+@pytest.fixture
+def milo_tetra(monkeypatch):
+    """Pretend GW's tetranerf build is installed, so validate() runs on any env."""
+    monkeypatch.setattr("augenblick.reconstruction.milo.tetranerf_installed", lambda: True)
+
+
+def test_milo_argv():
+    backend = MiloBackend(MiloConfig())
+    train, extract = (s.cmd for s in backend.stages(SCENE, OUT))
+    assert train == [
+        sys.executable, str(MILO_TRAIN_REGULAR_SCRIPT),
+        "-s", "/scene", "-m", "/out",
+        "--imp_metric", "indoor", "--rasterizer", "radegs",
+        "--mesh_config", "default_dtu", "--iterations", "30000",
+        "--lambda_mask", "0.1", "--data_device", "cpu",
+        "--test_iterations", "-1", "--checkpoint_iterations", "-1",
+        "-r", "-1",
+    ]
+    assert extract == [
+        sys.executable, str(MILO_SDF_SCRIPT), "-m", "/out",
+        "--iteration", "30000", "--rasterizer", "radegs", "--config", "default_dtu",
+        "--imp_metric", "indoor", "--refine_iter", "1000",
+    ]
+    assert backend.mesh_path(OUT) == OUT / "mesh_learnable_sdf.ply"
+    assert backend.backend_dir == MILO and backend.use_cwd
+
+
+def test_milo_fast_recipe_defaults():
+    train, extract = (s.cmd for s in MiloBackend(MiloConfig(densification="fast")).stages(SCENE, OUT))
+    assert train[1] == str(MILO_TRAIN_FAST_SCRIPT)
+    assert train[train.index("--iterations") + 1] == "18000"
+    assert train[train.index("--mesh_config") + 1] == "default"
+    # Extraction must load what training saved, with the same mesh config.
+    assert extract[extract.index("--iteration") + 1] == "18000"
+    assert extract[extract.index("--config") + 1] == "default"
+
+
+def test_milo_overrides_reach_train_and_extract():
+    cfg = MiloConfig(iterations=5000, densify_until_iter=3000, regularization_from_iter=2000,
+                     eval=True, white_background=True, dense_gaussians=True,
+                     decoupled_appearance=True, remove_oof_vertices=True, resolution=2)
+    train, _, extract = (s.cmd for s in MiloBackend(cfg).stages(SCENE, OUT))
+    for flag, value in (("--iterations", "5000"), ("--densify_until_iter", "3000"),
+                        ("--regularization_from_iter", "2000"), ("-r", "2")):
+        assert train[train.index(flag) + 1] == value
+    assert {"--eval", "--white_background", "--dense_gaussians", "--decoupled_appearance"} <= set(train)
+    assert extract[extract.index("--iteration") + 1] == "5000" and "--remove_oof_vertices" in extract
+
+
+def test_milo_mesh_config_path_reaches_both_stages(tmp_path, milo_tetra):
+    scene = _geosvr_scene(tmp_path / "scene")
+    yaml = tmp_path / "smoke.yaml"
+    yaml.write_text("start_iter: 3501\n")
+    train, extract = (s.cmd for s in MiloBackend(MiloConfig(mesh_config=str(yaml))).stages(scene, OUT))
+    assert train[train.index("--mesh_config") + 1] == str(yaml)
+    assert extract[extract.index("--config") + 1] == str(yaml)
+    with pytest.raises(ValueError, match="does not exist"):
+        MiloBackend(MiloConfig(mesh_config=str(tmp_path / "missing.yaml"))).validate(scene)
+
+
+def test_milo_eval_renders_before_extraction():
+    stages = MiloBackend(MiloConfig(eval=True)).stages(SCENE, OUT)
+    assert [s.name for s in stages] == ["MILo training", "Held-out rendering", "Mesh extraction"]
+    assert stages[1].cmd == [sys.executable, str(MILO_RENDER_SCRIPT), "-m", "/out",
+                             "--rasterizer", "radegs", "--skip_train"]
+    assert "--eval" in stages[0].cmd
+
+
+def test_milo_without_eval_has_two_stages():
+    stages = MiloBackend(MiloConfig()).stages(SCENE, OUT)
+    assert [s.name for s in stages] == ["MILo training", "Mesh extraction"]
+    assert "--eval" not in stages[0].cmd
+
+
+def test_milo_tsdf_switches_script_and_mesh_path():
+    backend = MiloBackend(MiloConfig(extract="tsdf", mesh_res=512))
+    assert backend.stages(SCENE, OUT)[-1].cmd == [
+        sys.executable, str(MILO_TSDF_SCRIPT), "-m", "/out",
+        "--rasterizer", "radegs", "--mesh_res", "512", "--num_cluster", "50",
+    ]
+    assert backend.mesh_path(OUT) == OUT / "mesh_regular_tsdf_res512_post.ply"
+
+
+def test_milo_mask_loss_requires_every_registered_mask(tmp_path, monkeypatch, milo_tetra):
+    scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
+    monkeypatch.setattr("augenblick.reconstruction.base.registered_stems", lambda _: ["a", "b"])
+    with pytest.raises(SceneError, match="lambda_mask"):
+        MiloBackend(MiloConfig()).validate(scene)
+    MiloBackend(MiloConfig(lambda_mask=0.0)).validate(scene)
+    monkeypatch.setattr("augenblick.reconstruction.base.registered_stems", lambda _: ["a"])
+    MiloBackend(MiloConfig()).validate(scene)
+
+
+def test_milo_gof_refuses_mask_loss(tmp_path, milo_tetra):
+    # GOF renders no alpha, so the mask loss would silently do nothing.
+    scene = _geosvr_scene(tmp_path / "scene")
+    with pytest.raises(ValueError, match="radegs"):
+        MiloBackend(MiloConfig(rasterizer="gof")).validate(scene)
+    MiloBackend(MiloConfig(rasterizer="gof", lambda_mask=0.0)).validate(scene)
+
+
+def test_milo_requires_tetranerf(tmp_path, monkeypatch):
+    # Upstream only warns without it, then dies at the first Delaunay step, hours in.
+    monkeypatch.setattr("augenblick.reconstruction.milo.tetranerf_installed", lambda: False)
+    with pytest.raises(SceneError, match="tetranerf"):
+        MiloBackend(MiloConfig(lambda_mask=0.0)).validate(_geosvr_scene(tmp_path / "scene"))
+
+
+def test_milo_reads_scene_in_place(tmp_path):
+    scene = _geosvr_scene(tmp_path / "scene")
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    backend = MiloBackend(MiloConfig(eval=True))
+    assert backend.prepare(scene, tmp_path / "out") is scene
+    train = backend.stages(scene, tmp_path / "out")[0].cmd
+    assert train[train.index("-s") + 1] == str(scene.root)
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+
+
+def test_milo_read_config_cli_patch(tmp_path):
+    """Patch 3e against the vendored arguments module: a CLI flag beats configs/fast."""
+    cfg = tmp_path / "fast"
+    cfg.write_text("Namespace(iterations=18_000, densify_until_iter=3_000)")
+    code = f"""
+import json, sys
+from argparse import ArgumentParser
+from arguments import read_config
+p = ArgumentParser()
+p.add_argument("--iterations", type=int, default=30000)
+p.add_argument("--densify_until_iter", type=int, default=15000)
+p.add_argument("--resolution", "-r", type=int, default=-1)
+p.add_argument("--config_path", type=str, default={str(cfg)!r})
+ns = read_config(p)
+print(json.dumps([ns.iterations, ns.densify_until_iter, ns.resolution]))
+"""
+
+    def parse(*flags):
+        # cwd=MILO so upstream's top-level `arguments` package is the one imported.
+        out = subprocess.run([sys.executable, "-c", code, *flags], cwd=MILO,
+                             capture_output=True, text=True, check=True)
+        return json.loads(out.stdout.splitlines()[-1])
+
+    assert parse() == [18000, 3000, -1]
+    assert parse("--iterations", "2000") == [2000, 3000, -1]
+    # Explicit values equal to the config, and the --x=v spelling, still count as given.
+    assert parse("--iterations", "18000", "--densify_until_iter=500") == [18000, 500, -1]
+    assert parse("-r", "2") == [18000, 3000, 2]
+
+
+def test_milo_patches_present():
+    """Guards the input-scene, socket, rename and mesh-config patches against a careless resync."""
+    files = {p: p.read_text() for p in MILO.rglob("*.py")}
+    readers = (MILO / "scene" / "dataset_readers.py").read_text()
+    assert "    storePly(ply_path, xyz, rgb)\n" not in readers
+    assert "split.json" in readers and 'masks_folder = os.path.join' in readers
+    assert "mask_path" in (MILO / "utils" / "camera_utils.py").read_text()
+    for trainer in ("train.py", "train_regular_densification.py"):
+        text = (MILO / trainer).read_text()
+        assert "network_gui.init(" not in text
+        assert 'args.mesh_config.endswith(".yaml")' in text
+        assert "opt.lambda_mask" in text
+    assert 'args.config.endswith(".yaml")' in (MILO / "mesh_extract_sdf.py").read_text()
+    assert "self.lambda_mask = 0.0" in (MILO / "arguments" / "__init__.py").read_text()
+    assert "min(cluster_to_keep, len(cluster_n_triangles))" in (MILO / "utils" / "regular_tsdf_utils.py").read_text()
+    # SuGaR owns diff_gaussian_rasterization; nothing in MILo may import that name.
+    for path, text in files.items():
+        assert "from diff_gaussian_rasterization import" not in text, path
+        assert "import diff_gaussian_rasterization\n" not in text, path
+    setup = (MILO.parent / "submodules" / "diff-gaussian-rasterization-radegs" / "setup.py").read_text()
+    assert 'name="diff_gaussian_rasterization_radegs._C"' in setup
+    assert (MILO.parent / "submodules" / "diff-gaussian-rasterization-radegs"
+            / "diff_gaussian_rasterization_radegs" / "__init__.py").is_file()
+    patched = [p for p, t in files.items() if "LOCAL PATCH (augenblick)" in t]
+    assert len(patched) == 10
+
+
+def test_require_registered_masks(tmp_path, monkeypatch):
+    scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
+    monkeypatch.setattr("augenblick.reconstruction.base.registered_stems", lambda _: ["a", "b"])
+    require_registered_masks(scene, 0.0)
+    with pytest.raises(SceneError, match=r"1 of 2 lack masks/<stem>.png \(e.g. \['b'\]\)"):
+        require_registered_masks(scene, 0.5)
+
+
+def test_milo_fast_refuses_regularising_during_densification(tmp_path, milo_tetra):
+    # train.py's regularised renderer returns no area_max, which densification still reads.
+    scene = _geosvr_scene(tmp_path / "scene")
+    with pytest.raises(ValueError, match="regularization_from_iter"):
+        MiloBackend(MiloConfig(densification="fast", regularization_from_iter=2000)).validate(scene)
+    with pytest.raises(ValueError, match="regularization_from_iter"):
+        MiloBackend(MiloConfig(densification="fast", densify_until_iter=4000)).validate(scene)
+    # lambda_mask 0 keeps these off the mask check, which reads a real COLMAP model.
+    MiloBackend(MiloConfig(densification="fast", lambda_mask=0.0)).validate(scene)
+    MiloBackend(MiloConfig(densification="fast", densify_until_iter=2000,
+                           regularization_from_iter=2000, lambda_mask=0.0)).validate(scene)
+    # The regular trainer densifies with RaDe-GS throughout, so it has no such coupling.
+    MiloBackend(MiloConfig(densify_until_iter=3000, regularization_from_iter=2000,
+                           lambda_mask=0.0)).validate(scene)
+
+
+def test_milo_tsdf_default_resolution():
+    # Upstream's 1024 spans the camera distance, leaving a turntable specimen ~150 voxels wide.
+    backend = MiloBackend(MiloConfig(extract="tsdf"))
+    cmd = backend.stages(SCENE, OUT)[-1].cmd
+    assert cmd[cmd.index("--mesh_res") + 1] == "4096"
+    assert backend.mesh_path(OUT) == OUT / "mesh_regular_tsdf_res4096_post.ply"

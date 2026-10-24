@@ -23,7 +23,7 @@ build today (checked 2026-10-17):
 
 | Env | torch | numpy | `common.sh` module | Notes |
 |---|---|---|---|---|
-| `augenblick_rtx_pro_6000` | 2.9.1+cu130 | 2.2.6 | `cuda/13.0.2` | carries every backend incl. GeoSVR, DVLT |
+| `augenblick_rtx_pro_6000` | 2.9.1+cu130 | 2.2.6 | `cuda/13.0.2` | carries every backend incl. GeoSVR, DVLT, MILo |
 | `augenblick_b200` | 2.9.0+cu128 | 1.26.4 | `cuda/12.8` | no SAM 3, DVLT or GeoSVR; drifted from its setup script |
 
 `hpg_slurm/common.sh` loads the module each env was *built* with, not the wrapper's. Rebuilding
@@ -45,15 +45,22 @@ NUMPY_GENERATION`, then `exec` into `scripts/setup_common.sh`, which does the wo
 import verification): torch → `requirements.txt` → VGGT + LightGlue → SAM 3 + DVLT → pytorch3d
 → nvdiffrast → backend CUDA extensions → `tetra_triangulation` → the `augenblick` package itself
 (so the separate `pip install -e .` in the quick start is a no-op after a full setup). The
-import check covers the SuGaR/2DGS/PGSR rasterizers but **not** GW's, `svraster_cuda`, SAM 3 or
-DVLT — a broken build of those surfaces at run time. `auto_setup.sh` exits 2 with a copy-this-wrapper hint on an unknown
+import check covers the SuGaR/2DGS/PGSR/MILo rasterizers and `tetranerf` but **not** GW's,
+`svraster_cuda`, SAM 3 or DVLT — a broken build of those surfaces at run time. `auto_setup.sh` exits 2 with a copy-this-wrapper hint on an unknown
 compute capability.
 
 ### `setup_common.sh` knobs
 
-- `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr"`) — subset of CUDA extensions to build
-  (`geosvr` builds `src/libs/geosvr/cuda`, i.e. `svraster_cuda`).
-- `SKIP_TETRA=1` — skip the fragile CGAL `tetra_triangulation` build (GW pivot extraction only).
+- `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr milo"`) — subset of CUDA extensions to build
+  (`geosvr` builds `src/libs/geosvr/cuda`, i.e. `svraster_cuda`; `milo` builds its RaDe-GS and
+  GOF rasterisers, plus SuGaR's `simple-knn` and GW's `_ms`/`fused-ssim` when `sugar`/`gw` are
+  not also selected, so `BACKENDS=milo` alone is complete).
+- `SKIP_TETRA=1` — skip the fragile CGAL `tetra_triangulation` build. That disables GW pivot
+  extraction **and MILo**, whose Delaunay step uses it (`recon milo` refuses to start without it).
+- **Module-name collision:** MILo's RaDe-GS rasteriser installs upstream as
+  `diff_gaussian_rasterization`, SuGaR's vanilla 3DGS module name, and would silently replace it.
+  The vendored copy is renamed `diff_gaussian_rasterization_radegs`; keep it renamed on any
+  resync, and check any new backend's extension names against the env before building.
 - `PYTORCH3D_WHEEL=<url>` — install a prebuilt pytorch3d instead of the source build.
 
 ### GeoSVR dependencies: keep `transformers` aligned with the hub pin
@@ -158,7 +165,7 @@ The editable installs carry their own dependency lists, which the constraint fil
   `requirements.txt` entry (backend-dvlt.md).
 - `src/libs/pytorch3d` — `install_requires=["iopath"]`.
 - `tetra_triangulation` — `trimesh>=3.20.2`.
-- The CUDA extensions (eight rasterizers plus `svraster_cuda`) declare **no** Python deps; they are unaffected by numpy pins
+- The CUDA extensions (ten rasterizers plus `svraster_cuda`) declare **no** Python deps; they are unaffected by numpy pins
   (though they must be rebuilt against the installed torch).
 
 `torch`/`torchvision` look unpinned in the vggt and lightglue lists, but stage 1 installs the
@@ -194,7 +201,8 @@ package is the inner `vggt/`). An editable install made from the old `src/` must
 index (`git ls-files --stage | awk '$1=="160000"'`); edits inside them do not commit with this
 repo. **`src/libs/sugar` is not a submodule** (older docs claimed it was); it is vendored
 in-tree, as are `src/libs/2dgs`, `src/libs/pgsr`, `src/libs/gaussian_wrapping`, `src/libs/vggt`,
-and the trimmed, locally patched `src/libs/sam3`, `src/libs/dvlt` and `src/libs/geosvr`.
+and the trimmed, locally patched `src/libs/sam3`, `src/libs/dvlt`, `src/libs/geosvr` and
+`src/libs/milo`.
 
 ## GPU notes
 

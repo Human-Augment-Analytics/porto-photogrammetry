@@ -42,7 +42,7 @@ augenblick recon --list
 
 `sfm`/`recon` take `--scene`; `mask` takes `--images` (a flat images folder — it produces a
 scene rather than consuming one). Methods: mask `rembg`, `threshold`, `sam3`; SfM `vggt`,
-`dvlt`, `colmap`, `turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`.
+`dvlt`, `colmap`, `turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`, `milo`.
 Evaluation is deliberately **not** a stage here: `python -m augenblick.eval.{nvs,mesh,scale}`
 (see pipeline-evaluation.md).
 
@@ -96,7 +96,7 @@ Stage ABCs:
   not standalone SfM. `hull` further requires `masks/`.
 - **`ReconstructionMethod(SceneInputMixin, Method[Scene])`** requires both `images/` and
   `sparse/0/`, adds `stages()` and `mesh_path()`. **`SubprocessBackend`** implements `run()`
-  once for all five backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
+  once for all six backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
 
 ### Registry
 
@@ -157,7 +157,8 @@ each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
   path, not the output dir.
 - **2DGS** always passes `--skip_test` on render; `mesh_path()` is
   `train/ours_<iterations>/fuse_post.ply`.
-- **GeoSVR** loads a yacs preset via `--cfg_files`, then overrides it with flags; vendored patches make a flag always beat the preset and let `True` bools be turned off. Other vendored patches give it the same `-s`/`-m` script interface as the other backends. It reads the scene in place (no `prepare()`) and keeps every intermediate under the output dir. Its `validate()` also requires a mask per image while `lambda_mask > 0`. See [backend-geosvr.md](backend-geosvr.md).
+- **GeoSVR** loads a yacs preset via `--cfg_files`, then overrides it with flags; vendored patches make a flag always beat the preset and let `True` bools be turned off. Other vendored patches give it the same `-s`/`-m` script interface as the other backends. It reads the scene in place (no `prepare()`) and keeps every intermediate under the output dir. Its `validate()` also requires a mask per registered image while `lambda_mask > 0`, via `require_registered_masks` in `reconstruction/base.py`, shared with MILo. See [backend-geosvr.md](backend-geosvr.md).
+- **MILo** picks one of **two trainer scripts** from one field (`--densification`), and derives the iteration count and mesh config from it for both training and extraction, which must agree. It reads the scene in place (no `prepare()`); its `validate()` checks the `tetranerf` build, the rasteriser/mask-loss pairing and the masks. See [backend-milo.md](backend-milo.md).
 
 Passthrough is gated on `accepts_passthrough` rather than applied globally, so a typo in any other
 backend is rejected instead of silently forwarded.

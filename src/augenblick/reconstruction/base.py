@@ -6,15 +6,41 @@ from pathlib import Path
 from typing import ClassVar
 
 from augenblick.core import process
+from augenblick.core.errors import SceneError
 from augenblick.core.method import Method, SceneInputMixin, StageResult
 from augenblick.core.scene import Scene
 from augenblick.core.timing import StageTimer
-from augenblick.eval.split import write_split
+from augenblick.eval.split import registered_stems, write_split
 
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIBS_DIR = REPO_ROOT / "src" / "libs"
+
+
+def require_registered_masks(scene: Scene, lambda_mask: float) -> None:
+    """Fail before training when a mask loss is on and a registered image has no mask.
+
+    The backends with a mask loss read each camera's mask unguarded, so one unmasked view
+    would crash training mid-run. Only registered images are checked: masked COLMAP drops
+    unmasked ones from the model, and the backends never load them.
+
+    Args:
+        scene: The scene the backend will read.
+        lambda_mask: The configured mask-loss weight; nothing is required when it is 0.
+
+    Raises:
+        SceneError: If lambda_mask > 0 and any registered image lacks masks/<stem>.png.
+    """
+    if lambda_mask <= 0:
+        return
+    stems = registered_stems(scene.model_dir)
+    missing = [s for s in stems if not (scene.masks_dir / f"{s}.png").is_file()]
+    if missing:
+        raise SceneError(
+            f"lambda_mask={lambda_mask} needs a mask per registered image, but "
+            f"{len(missing)} of {len(stems)} lack masks/<stem>.png (e.g. {missing[:5]}); "
+            "pass --lambda_mask 0 to train without it")
 
 
 @dataclass(frozen=True)

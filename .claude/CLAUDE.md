@@ -38,6 +38,7 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [backend-pgsr.md](MEMORY/backend-pgsr.md) | PGSR planar Gaussians, multi-view losses, TSDF meshing |
 | [backend-gaussian-wrapping.md](MEMORY/backend-gaussian-wrapping.md) | GW three stages, components, CUDA submodule matrix |
 | [backend-geosvr.md](MEMORY/backend-geosvr.md) | GeoSVR sparse voxels, yacs CLI fixes, outputs, vendoring + local patches |
+| [backend-milo.md](MEMORY/backend-milo.md) | MILo mesh-in-the-loop: two recipes, extractors, shared GW/SuGaR builds, RaDe-GS rename, local patches |
 | [baseline-meshroom.md](MEMORY/baseline-meshroom.md) | Meshroom wrapper + reference runtimes |
 | [repo-conventions.md](MEMORY/repo-conventions.md) | Doc rule, repo layout, legacy code, ID/naming and commit conventions |
 | [cluster-slurm.md](MEMORY/cluster-slurm.md) | SLURM job scripts for HiPerGator + PACE ICE, partitions/accounts, GPU switch, timing CSV, batch-env gotchas |
@@ -59,7 +60,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 | Data preparation | `pipeline/preparation/prepare_uf_dataset.py` |
 | Masking | `augenblick mask {rembg,threshold,sam3}` — produces `masks/` from a flat images folder |
 | SfM | `augenblick sfm {vggt,dvlt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
-| Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw,geosvr}` |
+| Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw,geosvr,milo}` |
 | Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
 | Evaluation | `python -m augenblick.eval.{nvs,mesh,scale}` — not on the `augenblick` CLI |
 
@@ -116,11 +117,11 @@ stale `build/` dirs): [environment-and-gpu.md](MEMORY/environment-and-gpu.md).
 - `download_morphosource_project.py` defaults to a **seeded 3-specimen sample** (~3.2 GB), not
   the whole 869 GB project; `--dry-run` costs nothing and needs no API key.
 - All third-party backends live under `src/libs/` (`2dgs`, `pgsr`, `sugar`,
-  `gaussian_wrapping`, `geosvr`, `vggt`, `dvlt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
+  `gaussian_wrapping`, `geosvr`, `milo`, `vggt`, `dvlt`, `light_glue`, `pytorch3d`, `sam3`). First-party code is
   `src/augenblick/` (the package), `pipeline/preparation/`, and `src/utils/`.
-- `src/libs/{sam3,dvlt,geosvr}` carry marked `LOCAL PATCH (augenblick)` edits (sam3 and dvlt
+- `src/libs/{sam3,dvlt,geosvr,milo}` carry marked `LOCAL PATCH (augenblick)` edits (sam3 and dvlt
   are also trimmed to inference) — never sync them wholesale from upstream; re-apply the patches
-  listed in pipeline-masking.md, backend-dvlt.md, backend-geosvr.md. Do not delete sam3's
+  listed in pipeline-masking.md, backend-dvlt.md, backend-geosvr.md, backend-milo.md. Do not delete sam3's
   `perflib/fa3.py`, lazily imported on Hopper.
 - `augenblick mask sam3` is GPU-only and needs a checkpoint from the **gated** HF repo
   `facebook/sam3`; it takes a text `--prompt` (default `skeleton`).
