@@ -305,6 +305,11 @@ augenblick sfm colmap \
     --scene /path/to/scene/ \
     --output /output/colmap_masked/
 
+# Optional GLOMAP global mapping with the same masked SIFT and exhaustive matching.
+augenblick sfm glomap \
+    --scene /path/to/scene/ \
+    --output /output/glomap_masked/
+
 # Turntable rig refinement (object on a turntable, static cameras)
 # Takes an existing COLMAP scene and re-solves poses on exact circular orbits.
 augenblick sfm turntable \
@@ -320,6 +325,14 @@ augenblick sfm hull \
     --scene /output/colmap_masked/ \
     --output /output/hull/
 ```
+
+GLOMAP uses `pycolmap.global_mapping` (verified with PyCOLMAP 4.1.1); no separate
+GLOMAP executable is required. It accepts the same `--max_image_size` and
+`--camera_model` options as COLMAP and writes the same `images/`, optional
+`masks/`, and `sparse/0/` scene layout for reconstruction. COLMAP remains the
+incremental option. A PyCOLMAP build without the global-mapping API fails before
+feature extraction rather than falling back to COLMAP. GPU/Ceres acceleration
+depends on the installed PyCOLMAP build.
 
 ### Step 2: Surface Reconstruction
 
@@ -392,10 +405,25 @@ augenblick recon gw   --scene <sfm> --output /output/gw_eval/   --eval -r 2
 augenblick recon geosvr --scene <sfm> --output /output/geosvr_eval/ --eval -r 2
 ```
 
-Each run writes `<output>/nvs_metrics.json` holding masked PSNR, SSIM and LPIPS averaged over
+Each run writes `<output>/nvs_metrics.json` holding PSNR, SSIM, LPIPS and DISTS averaged over
 the held-out views, plus a per-view breakdown. Both the render and the photograph are masked to
 the specimen before scoring, because these are masked turntable captures where scoring the
 background would mostly reward reproducing the black surround.
+
+PSNR and SSIM are reduced over specimen-mask pixels. LPIPS and DISTS use the
+same tight specimen bounding-box crop after masking, without an additional
+resize; DISTS receives RGB in `[0, 1]`. Lower LPIPS/DISTS means greater
+reference similarity. DISTS is complementary structure/texture similarity,
+not proof of human preference, texture-only quality, or geometric accuracy.
+New reports contain a `dists` field per view and at the top level; existing
+metrics and scores are unchanged. GPU scoring retries on CPU if a view runs
+out of CUDA memory.
+
+Install the updated requirements (`dists-pytorch==0.1`) before rescoring.
+The upstream package loads learned DISTS weights from the active Python
+environment's `weights.pt` and uses pretrained torchvision VGG16 weights.
+Ensure these are installed/cached before running on an offline compute node;
+use the same environment for installation and scoring.
 
 The held-out set is fixed by `<scene>/split.json`, which the first `--eval` run writes by
 holding out every 8th registered image. Every backend reads that file in preference to its own
@@ -422,31 +450,13 @@ without exposure compensation: that stage fits one exposure per training camera,
 camera has none, and leaving it on would score the reconstruction against an exposure it was
 never given. `sugar` does not support `--eval`.
 
-### Mesh evaluation and metric scale
+### Metric scale and geometric evaluation
 
-Evaluation is not part of the `augenblick` CLI; each scorer is a module. Score a mesh against a
-reference mesh:
-
-```bash
-python -m augenblick.eval.mesh --ours <mesh.ply> --reference <ref.ply> [--rigid]
-```
-
-Without `--rigid` the mesh is registered with a similarity transform, which solves for scale and
-so cannot report scale error. `--rigid` fixes scale at 1.0, which only makes sense once the mesh
-is in metric units. A COLMAP reconstruction has an arbitrary scale, so an unscaled mesh scored
-with `--rigid` gets F = 0 at every tolerance.
-
-To recover millimetres, photograph printed scale bars with coded targets alongside the specimen:
-
-```bash
-python -m augenblick.eval.scale --model <sfm>/sparse/0 --scene <scene> \
-    --detections detections.json --primary <code> <code> --check <code> <code> \
-    --apply-to <mesh.ply> --json-out scale_result.json
-```
-
-The scale is fitted on the primary bar and checked against the check bar. The command exits 0
-and writes the scaled mesh only when the scale passes its acceptance gates. The full protocol is
-in [docs/scale-protocol.md](docs/scale-protocol.md).
+Printed scale bars recover an independent millimetre scale for a reconstruction, and the
+scaled mesh is then scored rigidly against a structured-light reference. The full protocol,
+gates and an end-to-end walkthrough (detection, the bar codebook, scaling, scoring) are in
+[docs/scale-protocol.md](docs/scale-protocol.md); the HiPerGator stages are
+`hpg_slurm/scale_markers.sbatch` and `hpg_slurm/geometry_eval.sbatch`.
 
 ### Output
 

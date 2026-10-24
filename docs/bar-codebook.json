@@ -1,0 +1,181 @@
+{
+  "_comment": [
+    "Printed scale bars photographed in FLMNH turntable captures, with detector codes",
+    "and photo-verified centre-to-centre lengths. THE DETECTOR CODES DO NOT DETERMINE",
+    "THE PRINTED LENGTH: codes 1675/1419 appear below on a 100 mm bar (labels 162/163)",
+    "and on a 0.05 m bar (labels 122/123). Before scaling a new capture, open one",
+    "photograph, read the printed labels and length, and record the family here.",
+    "Codes are the canonical CCT_20bit_black ids reported by PGT-Toolkit; labels are",
+    "the numbers printed next to each target on the physical Palaeo3D bar.",
+    "Pick the code pair with the most frames showing both targets; a capture can hold two bars, and a pair spanning two different bars looks plausible but is not rigid."
+  ],
+  "families": [
+    {
+      "name": "two_bar_100mm_subset",
+      "bars": [
+        {
+          "codes": [
+            "1675",
+            "1419"
+          ],
+          "labels": [
+            "162",
+            "163"
+          ],
+          "length_mm": 100.0
+        },
+        {
+          "codes": [
+            "1181",
+            "1949"
+          ],
+          "labels": [
+            "114",
+            "115"
+          ],
+          "length_mm": 100.0
+        }
+      ],
+      "verified": "photographs of the neurips subset scale position",
+      "notes": "Two bars allow the full two-bar protocol: one primary, one check."
+    },
+    {
+      "name": "single_bar_50mm",
+      "bars": [
+        {
+          "codes": [
+            "1139",
+            "1907"
+          ],
+          "labels": [
+            "156",
+            "157"
+          ],
+          "length_mm": 50.0
+        }
+      ],
+      "verified": "photographs across the full collection (majority family)",
+      "notes": "Single bar: no in-capture check; verify the scale downstream."
+    },
+    {
+      "name": "single_bar_25mm",
+      "bars": [
+        {
+          "codes": [
+            "2003",
+            "1235"
+          ],
+          "labels": [
+            "150",
+            "151"
+          ],
+          "length_mm": 25.0
+        }
+      ],
+      "verified": "photographs of the small-specimen captures",
+      "notes": "Small bar; detection coverage is often the limiting factor."
+    },
+    {
+      "name": "two_bar_50mm_code_collision",
+      "bars": [
+        {
+          "codes": [
+            "1675",
+            "1419"
+          ],
+          "labels": [
+            "122",
+            "123"
+          ],
+          "length_mm": 50.0
+        },
+        {
+          "codes": [
+            "1587",
+            "1331"
+          ],
+          "labels": null,
+          "length_mm": 50.0
+        }
+      ],
+      "verified": "photographs of UF_Herp_87980 captures",
+      "notes": "Shares codes 1675/1419 with the 100 mm family; treating them as 100 mm produces a silent factor-two scale error, caught only by the metric reference."
+    },
+    {
+      "name": "two_bar_25mm_11436_cranium",
+      "bars": [
+        {
+          "codes": [
+            "1363",
+            "1619"
+          ],
+          "labels": [
+            "149",
+            "148"
+          ],
+          "length_mm": 25.0
+        },
+        {
+          "codes": [
+            "3527",
+            "51"
+          ],
+          "labels": [
+            "140",
+            "141"
+          ],
+          "length_mm": 25.0
+        }
+      ],
+      "verified": "photograph UF_Mammals_11436_cranium IMG_0479, decoded centres overlaid",
+      "notes": "Two 0.025 m bars in one capture. The 140/141 bar decodes sparsely and its estimate disperses by 29%, so the 148/149 bar carries the scale."
+    },
+    {
+      "name": "two_bar_25mm_11436_mandible",
+      "bars": [
+        {
+          "codes": [
+            "1043",
+            "1811"
+          ],
+          "labels": [
+            "144",
+            "145"
+          ],
+          "length_mm": 25.0
+        },
+        {
+          "codes": [
+            "2019",
+            "1253"
+          ],
+          "labels": [
+            "143",
+            "142"
+          ],
+          "length_mm": 25.0
+        }
+      ],
+      "verified": "photograph UF_Mammals_11436_mandible IMG_0628, decoded centres overlaid",
+      "notes": "Two 0.025 m bars; the 142/143 bar never triangulates, the 144/145 bar carries the scale."
+    },
+    {
+      "name": "single_bar_100mm_second_palaeo3d",
+      "bars": [
+        {
+          "codes": [
+            "1181",
+            "1949"
+          ],
+          "labels": [
+            "114",
+            "115"
+          ],
+          "length_mm": 100.0
+        }
+      ],
+      "verified": "photograph UF_Herp_87980_lower_jaw Scale_IMG_7178, both bars print 0.1 m",
+      "notes": "The check bar of the two-bar 100 mm set also serves as a primary bar where it is the only one decoded. The same photograph shows labels 122/123 printed 0.1 m, so that label pair is not inherently 0.05 m."
+    }
+  ]
+}
