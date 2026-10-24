@@ -108,9 +108,11 @@ def render_set(name, iteration, suffix, args, datapack, voxel_model, volume=None
         depths_tsdf_fusion.append(depth_tsdf.squeeze().cpu())
         
     if volume is not None:
-        depths_tsdf_fusion = torch.stack(depths_tsdf_fusion, dim=0)
+        # LOCAL PATCH (augenblick): a scene can mix image sizes (two cameras), so the depths
+        # stay a list; upstream stacked them, and took every view's size from the last one.
         for idx, view in enumerate(tqdm(views, desc="TSDF Fusion progress")):
             ref_depth = depths_tsdf_fusion[idx].cuda()
+            H, W = ref_depth.shape
 
             if view.mask is not None:
                 ref_depth[view.mask.squeeze() < 0.5] = 0

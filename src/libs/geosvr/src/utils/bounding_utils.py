@@ -81,7 +81,10 @@ def main_scene_bound_pcd_heuristic(pcd, pcd_density_rate):
 
     # Find the smallest radius with point density equal to pcd_density_rate of maximum
     target_density = pcd_density_rate * density[max_idx]
-    target_idx = max_idx + np.where(density[max_idx:] < target_density)[0][0]
+    # LOCAL PATCH (augenblick): a compact masked cloud may never thin to the target density,
+    # where upstream indexed an empty array; bound by the whole cloud instead.
+    below = np.where(density[max_idx:] < target_density)[0]
+    target_idx = max_idx + below[0] if len(below) else len(dist) - 1
 
     radius = dist[target_idx]
 

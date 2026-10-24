@@ -8,6 +8,7 @@ from typing import ClassVar, Literal
 from augenblick.core.errors import SceneError
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
+from augenblick.eval.split import registered_stems
 from augenblick.reconstruction.base import (
     LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend)
 
@@ -79,20 +80,21 @@ class GeosvrBackend(SubprocessBackend):
     title: ClassVar[str] = "GeoSVR Reconstruction Pipeline"
 
     def validate(self, scene: Scene) -> None:
-        """Also require a mask for every image when the mask loss is on.
+        """Also require a mask for every registered image when the mask loss is on.
 
         Raises:
-            SceneError: If lambda_mask > 0 and any image lacks masks/<stem>.png.
+            SceneError: If lambda_mask > 0 and any registered image lacks masks/<stem>.png.
         """
         super().validate(scene)
         if self.config.lambda_mask <= 0:
             return
         # Upstream reads cam.mask unguarded, so one unmasked view would crash training mid-run.
-        stems = sorted(p.name.split(".")[0] for p in scene.images_dir.iterdir() if p.is_file())
+        # Only registered images are loaded: masked COLMAP drops unmasked ones from the model.
+        stems = registered_stems(scene.model_dir)
         missing = [s for s in stems if not (scene.masks_dir / f"{s}.png").is_file()]
         if missing:
             raise SceneError(
-                f"lambda_mask={self.config.lambda_mask} needs a mask per image, but "
+                f"lambda_mask={self.config.lambda_mask} needs a mask per registered image, but "
                 f"{len(missing)} of {len(stems)} lack masks/<stem>.png (e.g. {missing[:5]}); "
                 "pass --lambda_mask 0 to train without it")
 

@@ -454,13 +454,29 @@ def test_geosvr_patches_present():
     # The depth prior must ignore the composited background, or it builds floaters there.
     losses = (GEOSVR / "src" / "utils" / "loss_utils.py").read_text()
     assert losses.count("outside_specimen(cam, alpha.shape)") == 2
+    # A compact masked cloud never thins to the target density; upstream then raised IndexError.
+    bounding = (GEOSVR / "src" / "utils" / "bounding_utils.py").read_text()
+    assert "if len(below) else len(dist) - 1" in bounding
+    # Mixed image sizes: no stacked depths, and each view fused at its own size.
+    for script in ("tsdf_mesh.py", "tsdf_mesh_360.py"):
+        text = (GEOSVR / "mesh_extract" / script).read_text()
+        assert "torch.stack(depths_tsdf_fusion" not in text
+        assert "            H, W = ref_depth.shape\n" in text
 
 
-def test_geosvr_mask_loss_requires_every_mask(tmp_path):
+def test_geosvr_mask_loss_requires_every_mask(tmp_path, monkeypatch):
     scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
+    monkeypatch.setattr("augenblick.reconstruction.geosvr.registered_stems", lambda _: ["a", "b"])
     with pytest.raises(SceneError, match="lambda_mask"):
         GeosvrBackend(GeosvrConfig()).validate(scene)
     GeosvrBackend(GeosvrConfig(lambda_mask=0.0)).validate(scene)
+
+
+def test_geosvr_mask_loss_ignores_unregistered_images(tmp_path, monkeypatch):
+    # Masked COLMAP drops unmasked images from the model, and GeoSVR never loads them.
+    scene = _geosvr_scene(tmp_path / "scene", masked=("a",))
+    monkeypatch.setattr("augenblick.reconstruction.geosvr.registered_stems", lambda _: ["a"])
+    GeosvrBackend(GeosvrConfig()).validate(scene)
 
 
 def test_geosvr_resolution_maps_long_side(tmp_path):
