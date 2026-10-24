@@ -197,9 +197,44 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
     return result
 
 
+def score_sugar_output(scene: Scene, output_dir: Path, iteration: int | None = None,
+                       extra: dict | None = None) -> dict:
+    """Score both SuGaR products through the same entry point during and after recon."""
+    manifest_path = output_dir / "sugar" / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    common = {**(extra or {}), "backend": "sugar", "scene": str(scene.root),
+              "model": str(output_dir)}
+    stems = resolve_test_stems(scene)
+    products = {}
+    for target, directory, filename in (
+        ("refined_splat", "test_splat", "nvs_metrics_splat.json"),
+        ("textured_mesh", "test_mesh", "nvs_metrics_mesh.json"),
+    ):
+        metadata = {**common, "target": target, "resolution": manifest.get("resolution")}
+        if target == "textured_mesh":
+            metadata["texture_square_size"] = manifest.get("texture_square_size")
+        products[target] = score(
+            find_test_dir(output_dir / directory, iteration), scene.masks_dir, stems,
+            output_dir / filename, extra=metadata,
+        )
+    primary = products["refined_splat"]
+    combined = {
+        **common, "primary_target": "refined_splat",
+        **{name: primary[name] for name in ("psnr", "ssim", "lpips", "n_test")},
+        **products,
+    }
+    with (output_dir / METRICS_FILENAME).open("w") as handle:
+        json.dump(combined, handle, indent=2)
+    return combined
+
+
 def score_output(scene: Scene, output_dir: Path, iteration: int | None = None,
                  extra: dict | None = None) -> dict:
     """Score the held-out renders a backend left under output_dir against the scene."""
+    if not (output_dir / "test").exists() and (
+        (output_dir / "test_splat").exists() or (output_dir / "test_mesh").exists()
+    ):
+        return score_sugar_output(scene, output_dir, iteration, extra)
     test_dir = find_test_dir(output_dir / "test", iteration)
     return score(test_dir, scene.masks_dir, resolve_test_stems(scene),
                  output_dir / METRICS_FILENAME, extra)

@@ -326,6 +326,7 @@ def refined_training(args):
     nerfmodel = GaussianSplattingWrapper(
         source_path=source_path,
         output_path=gs_checkpoint_path,
+        resolution=getattr(args, 'resolution', -1),
         iteration_to_load=iteration_to_load,
         load_gt_images=True,
         eval_split=use_eval_split,

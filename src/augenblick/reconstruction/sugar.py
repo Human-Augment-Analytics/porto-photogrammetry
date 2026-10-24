@@ -7,17 +7,18 @@ from typing import ClassVar, Literal, Optional
 
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import LIBS_DIR, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend
 
 logger = logging.getLogger(__name__)
 
 SUGAR_DIR = LIBS_DIR / "sugar"
 GS_TRAIN_SCRIPT = SUGAR_DIR / "gaussian_splatting" / "train.py"
 SUGAR_TRAIN_SCRIPT = SUGAR_DIR / "train.py"
+SUGAR_RENDER_SCRIPT = SUGAR_DIR / "render_refined.py"
 
 
 @dataclass(frozen=True)
-class SugarConfig:
+class SugarConfig(EvalParams, ResolutionParams):
     """Vanilla-3DGS and SuGaR parameters."""
 
     gs_iterations: int = field(default=20_000, metadata={"help": "Vanilla 3DGS training iterations"})
@@ -38,12 +39,16 @@ class SugarConfig:
     high_poly: bool = field(default=False, metadata={"help": "1M vertices, 1 gaussian/triangle"})
     refinement_time: Optional[Literal["short", "medium", "long"]] = field(
         default=None, metadata={"help": "Preset refinement duration (2k/7k/15k iterations)"})
-    square_size: int = field(default=4, metadata={
+    square_size: int = field(default=8, metadata={
         "help": "UV texture square size (larger → finer baked texture)"})
     postprocess_mesh: bool = field(default=False, metadata={
         "help": "Remove low-density border triangles (risky; can help single-sided objects)"})
     white_background: bool = field(default=False, metadata={"help": "Use white background"})
     gpu: int = field(default=0, metadata={"help": "GPU device index"})
+
+    def __post_init__(self):
+        if self.square_size < 5:
+            raise ValueError("square_size must be >= 5")
 
 
 @register_reconstruction
@@ -81,7 +86,10 @@ class SugarBackend(SubprocessBackend):
             "--densify_until_iter", str(c.gs_densify_until_iter),
             "--lambda_dssim", str(c.gs_lambda_dssim),
             "--sh_degree", str(c.gs_sh_degree),
+            "--resolution", str(c.resolution),
         ]
+        if c.eval:
+            gs_cmd.append("--eval")
 
         sugar_cmd = [
             sys.executable, str(SUGAR_TRAIN_SCRIPT),
@@ -95,8 +103,9 @@ class SugarBackend(SubprocessBackend):
             "-g", str(c.gaussians_per_triangle),
             "-f", str(c.refinement_iterations),
             "--square_size", str(c.square_size),
-            "--eval", "False",
+            "--eval", str(c.eval),
             "--gpu", str(c.gpu),
+            "--resolution", str(c.resolution),
         ]
         if c.postprocess_mesh:
             sugar_cmd += ["--postprocess_mesh", "True"]
@@ -109,10 +118,32 @@ class SugarBackend(SubprocessBackend):
         if c.white_background:
             sugar_cmd += ["--white_background", "True"]
 
-        return [
+        stages = [
             Stage("3DGS training", gs_cmd),
             Stage("SuGaR training", sugar_cmd),
         ]
+        if c.eval:
+            render_cmd = [
+                sys.executable, str(SUGAR_RENDER_SCRIPT),
+                "--scene", str(scene_dir),
+                "--manifest", str(sugar_output_dir / "run_manifest.json"),
+                "--output", str(output_dir),
+                "--gpu", str(c.gpu),
+            ]
+            if c.white_background:
+                render_cmd.append("--white_background")
+            stages.append(Stage("Held-out splat + mesh rendering", render_cmd))
+        return stages
+
+    def test_renders_root(self, output_dir: Path) -> Path:
+        """SuGaR's primary held-out renders are the refined splat; evaluate() scores the mesh too."""
+        return output_dir / "test_splat"
+
+    def evaluate(self, scene: Scene, output_dir: Path) -> dict:
+        """Score refined splat and textured-mesh renders separately."""
+        from augenblick.eval.nvs import score_sugar_output
+
+        return score_sugar_output(scene, output_dir)
 
     def mesh_path(self, output_dir: Path) -> Path:
         """Refined-mesh directory; upstream names it after the scene dir, not the output dir."""
