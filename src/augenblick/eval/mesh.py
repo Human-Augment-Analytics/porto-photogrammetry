@@ -1,6 +1,7 @@
 """Geometric evaluation of a reconstructed mesh against a reference."""
 from __future__ import annotations
 
+import itertools
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,9 @@ ICP_ITERATIONS = 40
 ICP_TRIM_PERCENTILE = 80.0
 ICP_SAMPLES = 40_000
 DECRUFT_PERCENTILES = (100.0, 99.5, 99.0, 98.0, 95.0)
+SEARCH_SAMPLES = 8_000
+SEARCH_ITERATIONS = 10
+REFINE_CANDIDATES = 4
 
 
 @dataclass(frozen=True)
@@ -75,8 +79,28 @@ def _normalise(points: np.ndarray, with_scale: bool):
 
 
 def _pca_axes(points: np.ndarray) -> np.ndarray:
+    """Principal axes as rows, in a right-handed frame."""
     _, _, vt = np.linalg.svd(points - points.mean(axis=0), full_matrices=False)
+    if np.linalg.det(vt) < 0:
+        vt[2] = -vt[2]
     return vt
+
+
+def _proper_rotations() -> list:
+    """The 24 rotations carrying one orthonormal frame onto another."""
+    out = []
+    for permutation in itertools.permutations(range(3)):
+        ordering = np.eye(3)[list(permutation)]
+        for sign_x in (1, -1):
+            for sign_y in (1, -1):
+                for sign_z in (1, -1):
+                    candidate = np.diag([sign_x, sign_y, sign_z]) @ ordering
+                    if np.linalg.det(candidate) > 0:
+                        out.append(candidate)
+    return out
+
+
+ORIENTATIONS = _proper_rotations()
 
 
 def _umeyama(src: np.ndarray, dst: np.ndarray, with_scale: bool):
@@ -97,12 +121,13 @@ def _umeyama(src: np.ndarray, dst: np.ndarray, with_scale: bool):
     return scale, rotation, mu_dst - scale * rotation @ mu_src
 
 
-def _icp(src: np.ndarray, dst_tree: cKDTree, dst: np.ndarray, with_scale: bool):
+def _icp(src: np.ndarray, dst_tree: cKDTree, dst: np.ndarray, with_scale: bool,
+         iterations: int = ICP_ITERATIONS):
     """Trimmed iterative closest point, rejecting the worst correspondences each round."""
     current = src.copy()
     total_scale, total_rotation, total_translation = 1.0, np.eye(3), np.zeros(3)
     previous = np.inf
-    for _ in range(ICP_ITERATIONS):
+    for _ in range(iterations):
         distances, indices = dst_tree.query(current, workers=-1)
         keep = distances <= np.percentile(distances, ICP_TRIM_PERCENTILE)
         scale, rotation, translation = _umeyama(current[keep], dst[indices[keep]], with_scale)
@@ -140,22 +165,32 @@ def fit_transform(src: np.ndarray, dst: np.ndarray, *, rigid: bool = False,
         tree = cKDTree(dst_icp)
         dst_axes, src_axes = _pca_axes(dst_icp), _pca_axes(src_icp)
 
-        for sign_x in (1, -1):
-            for sign_y in (1, -1):
-                reflection = np.diag([sign_x, sign_y, sign_x * sign_y])
-                initial = dst_axes.T @ reflection @ src_axes
-                scale, rotation, translation = _icp(
-                    (initial @ src_icp.T).T, tree, dst_icp, with_scale)
-                combined = rotation @ initial
-                # Fold the two normalisations into a single transform on raw coordinates.
-                total_scale = dst_radius * scale / src_radius
-                total_rotation = combined
-                total_translation = (dst_radius * translation + dst_centre
-                                     - total_scale * combined @ src_centre)
-                candidate = Transform(float(total_scale), total_rotation, total_translation)
-                score_value = _symmetric_chamfer(dst_reference, candidate.apply(src_scoring))
-                if score_value < best_score:
-                    best_score, best = score_value, candidate
+        search_dst = _subsample(dst_norm, SEARCH_SAMPLES, seed)
+        search_src = _subsample(src_norm, SEARCH_SAMPLES, seed)
+        search_tree = cKDTree(search_dst)
+        screened = []
+        for orientation in ORIENTATIONS:
+            initial = dst_axes.T @ orientation @ src_axes
+            scale, rotation, translation = _icp(
+                (initial @ search_src.T).T, search_tree, search_dst, with_scale,
+                iterations=SEARCH_ITERATIONS)
+            posed = (scale * (rotation @ (initial @ search_src.T)).T) + translation
+            screened.append((_symmetric_chamfer(search_dst, posed), initial))
+        screened.sort(key=lambda entry: entry[0])
+
+        for _, initial in screened[:REFINE_CANDIDATES]:
+            scale, rotation, translation = _icp(
+                (initial @ src_icp.T).T, tree, dst_icp, with_scale)
+            combined = rotation @ initial
+            # Fold the two normalisations into a single transform on raw coordinates.
+            total_scale = dst_radius * scale / src_radius
+            total_rotation = combined
+            total_translation = (dst_radius * translation + dst_centre
+                                 - total_scale * combined @ src_centre)
+            candidate = Transform(float(total_scale), total_rotation, total_translation)
+            score_value = _symmetric_chamfer(dst_reference, candidate.apply(src_scoring))
+            if score_value < best_score:
+                best_score, best = score_value, candidate
 
     if best is None:  # pragma: no cover - only reachable with empty input
         raise ValueError("registration produced no candidate")

@@ -237,9 +237,26 @@ tolerance denotes the same physical distance for every candidate.
 ### 3.3 Registration
 
 Reconstructions live in an arbitrary COLMAP frame, so they must be registered to the
-reference before scoring. `fit_transform` initialises from principal axes, trying every
-sign combination because near-symmetric specimens give ICP several plausible basins, and
-refines with trimmed ICP, keeping the candidate with the lowest symmetric Chamfer.
+reference before scoring. `fit_transform` initialises from principal axes and refines with
+trimmed ICP, keeping the candidate with the lowest symmetric Chamfer.
+
+The initialisation searches **all 24 proper rotations** relating the two principal-axis
+frames, not just their sign combinations. This is not thoroughness for its own sake: the
+axes of a near-symmetric specimen come out in an order that depends on how the mesh
+happens to be posed, so searching sign alone left the correct basin out of the candidate
+set entirely whenever the orders disagreed. Measured consequence before the fix: scoring
+one unchanged mesh after a rigid rotation, which cannot alter shape, moved F@0.5% by up
+to 0.15 on museum crania and mandibles, against a sampling noise of about 0.002. Each
+specimen had two attractors and landed in one or the other depending on its pose.
+
+`_pca_axes` also forces a right-handed frame. The sign convention of the singular
+vectors is arbitrary, so composing a left-handed basis with proper rotations silently
+excluded the correct alignment; fixing the orientation search alone did not cure the
+instability without it.
+
+The 24 candidates are screened with a short ICP on a small subsample and only the best
+few are refined, so the cost stays close to the original four-start search.
+`test_registration_does_not_depend_on_the_pose_it_is_handed` pins the property.
 
 Two modes exist and the choice matters:
 
