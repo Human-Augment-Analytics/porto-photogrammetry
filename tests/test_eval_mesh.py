@@ -261,3 +261,32 @@ def test_score_surface_applies_the_transform_to_both_representations():
     result = mesh.score_surface(shifted, reference, transform=identity, n=20_000)
     assert result["accuracy_mean_abs"] < 1e-3
     assert result["completeness_mean_abs"] < 1e-3
+
+def _near_symmetric_cloud(seed=0):
+    """Two near-degenerate principal axes, plus a notch to make the fit unique."""
+    rng = np.random.default_rng(seed)
+    points = rng.normal(size=(4000, 3)) * np.array([1.0, 0.99, 0.55])
+    notch = rng.normal(size=(400, 3)) * 0.05 + np.array([1.6, 0.0, 0.0])
+    return np.vstack([points, notch])
+
+
+def test_registration_does_not_depend_on_the_pose_it_is_handed():
+    """A rigid pre-rotation cannot change shape, so it must not change the fit."""
+    reference = _near_symmetric_cloud()
+    residuals = []
+    for angle in (0.0, 0.7, 1.4, 2.1, 2.8):
+        axis = np.array([0.3, 0.9, 0.3])
+        axis = axis / np.linalg.norm(axis)
+        cross = np.array([[0, -axis[2], axis[1]],
+                          [axis[2], 0, -axis[0]],
+                          [-axis[1], axis[0], 0]])
+        rotation = (np.eye(3) + np.sin(angle) * cross
+                    + (1 - np.cos(angle)) * (cross @ cross))
+        posed = (rotation @ reference.T).T + np.array([5.0, -2.0, 1.0])
+
+        transform = mesh.fit_transform(posed, reference, rigid=True)
+        recovered = transform.apply(posed)
+        residuals.append(float(np.abs(recovered - reference).max()))
+
+    assert max(residuals) < 1e-6, (
+        "registration depends on the input pose; residuals %s" % residuals)
