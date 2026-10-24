@@ -133,6 +133,7 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     lpips = metrics.Lpips()
+    dists = metrics.Dists()
     pairs = pair_views(test_dir, test_stems)
 
     views, skipped, masked = [], [], 0
@@ -166,6 +167,7 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
                 "psnr": metrics.psnr(pred, truth, mask),
                 "ssim": metrics.ssim(pred, truth, mask),
                 "lpips": lpips(pred, truth, mask),
+                "dists": dists(pred, truth, mask),
                 "mask_fill": fill,
             })
             del pred, truth, mask
@@ -186,6 +188,7 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
         "psnr": float(np.mean([v["psnr"] for v in views])),
         "ssim": float(np.mean([v["ssim"] for v in views])),
         "lpips": float(np.mean([v["lpips"] for v in views])),
+        "dists": float(np.mean([v["dists"] for v in views])),
         "views": views,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
