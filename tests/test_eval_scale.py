@@ -1,4 +1,7 @@
 """Tests for independent scale recovery from printed bars, on a synthetic turntable rig."""
+import json
+import types
+
 import numpy as np
 import pytest
 
@@ -144,7 +147,7 @@ class TestTriangulateTrack:
 class TestSlidingWindowScale:
     def test_recovers_known_scale(self):
         tracks, rings = synthetic_rig(noise=0.1)
-        result = scale.sliding_window_scale(tracks, rings, BARS)
+        result = scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
         assert result["accepted"]
         expected = 1.0 / UNITS_PER_MM
         assert result["scale_mm_per_model_unit"] == pytest.approx(expected, rel=1e-3)
@@ -155,7 +158,7 @@ class TestSlidingWindowScale:
 
     def test_all_windows_recorded(self):
         tracks, rings = synthetic_rig(noise=0.1)
-        result = scale.sliding_window_scale(tracks, rings, BARS)
+        result = scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
         assert len(result["windows"]) == 27
         assert all("markers" in w for w in result["windows"])
 
@@ -163,7 +166,7 @@ class TestSlidingWindowScale:
         """Consistent windows confined to one ring must not become an accepted scale."""
         tracks, rings = synthetic_rig(
             noise=0.1, drop=lambda ring, view, code: ring != 1)
-        result = scale.sliding_window_scale(tracks, rings, BARS)
+        result = scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
         assert not result["accepted"]
         assert result["acceptance_checks"]["distinct_rings"] <= 1
         # The rejected result still carries the diagnostic lengths for inspection.
@@ -173,7 +176,7 @@ class TestSlidingWindowScale:
         """Half-density coverage starves windows below the observation minimum."""
         tracks, rings = synthetic_rig(
             noise=0.1, drop=lambda ring, view, code: view % 2 == 0)
-        result = scale.sliding_window_scale(tracks, rings, BARS)
+        result = scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
         assert not result["accepted"]
 
     def test_moved_bar_fails_held_out(self):
@@ -194,7 +197,7 @@ class TestSlidingWindowScale:
                 xy = np.asarray(camera.img_from_cam(pose[:, :3] @ shifted + pose[:, 3]))
                 tracks[code][name] = scale.Observation(camera, pose, xy, name)
         rings.append(names)
-        result = scale.sliding_window_scale(tracks, rings, BARS)
+        result = scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
         failing = [w for w in result["windows"] if not w["passed"]]
         assert failing, "windows spanning the shift must fail"
         assert not result["accepted"]
@@ -203,7 +206,7 @@ class TestSlidingWindowScale:
         """A ring shorter than one window must be recorded and excluded, not wrapped."""
         tracks, rings = synthetic_rig(noise=0.1)
         stub = [f"r0_v{v:03d}" for v in range(10)]
-        result = scale.sliding_window_scale(tracks, [stub] + rings[1:], BARS)
+        result = scale.sliding_window_scale(tracks, [stub] + rings[1:], BARS, scale.Gates())
         assert result["skipped_rings"] == [
             {"ring": 0, "images": 10, "error": "shorter than one 24-view window"}]
         assert all(w["ring"] >= 1 for w in result["windows"])
@@ -211,7 +214,7 @@ class TestSlidingWindowScale:
     def test_single_usable_ring_is_reported_up_front(self):
         """An input that can never be accepted must say so, not just fail the gates."""
         tracks, rings = synthetic_rig(noise=0.1)
-        result = scale.sliding_window_scale(tracks, rings[:1], BARS)
+        result = scale.sliding_window_scale(tracks, rings[:1], BARS, scale.Gates())
         assert not result["accepted"]
         assert "cannot produce an accepted scale" in result["note"]
         assert len(result["windows"]) == 9  # diagnostics are still evaluated
@@ -220,11 +223,93 @@ class TestSlidingWindowScale:
         tracks, rings = synthetic_rig()
         del tracks["B2"]
         with pytest.raises(ValueError, match="B2"):
-            scale.sliding_window_scale(tracks, rings, BARS)
+            scale.sliding_window_scale(tracks, rings, BARS, scale.Gates())
 
     def test_gates_reject_insufficient_holdout(self):
         with pytest.raises(ValueError, match="inlier minimum"):
             scale.Gates(min_observations=12, withheld=8)
+
+    @pytest.mark.parametrize("bad", [0.0, -50.0, float("nan"), float("inf")])
+    def test_gates_reject_invalid_bar_length(self, bad):
+        with pytest.raises(ValueError, match="bar length"):
+            scale.Gates(known_length_mm=bad)
+
+
+class TestLoadTracks:
+    def _detections(self, tmp_path):
+        path = tmp_path / "detections.json"
+        path.write_text(json.dumps([
+            {"image": "a.jpg", "raw_detections": [{"code": "A1", "x": 10, "y": 20}]},
+            {"image": "b.jpg", "raw_detections": [{"code": "A1", "x": 11, "y": 21}]},
+        ]))
+        return path
+
+    def _model(self):
+        class Pose:
+            def matrix(self):
+                return np.c_[np.eye(3), np.zeros(3)]
+
+        image = types.SimpleNamespace(name="a.jpg", camera_id=1, cam_from_world=Pose())
+        return types.SimpleNamespace(images={1: image}, cameras={1: make_camera()})
+
+    def test_unregistered_detections_raise_by_default(self, tmp_path):
+        with pytest.raises(ValueError, match="not registered"):
+            scale._load_tracks(self._detections(tmp_path), self._model(), ("A1",))
+
+    def test_unregistered_detections_dropped_on_opt_in(self, tmp_path):
+        tracks = scale._load_tracks(self._detections(tmp_path), self._model(),
+                                    ("A1",), allow_unregistered=True)
+        assert set(tracks["A1"]) == {"a.jpg"}
+
+
+class TestBestEffortScale:
+    PAIR = ("A1", "A2")
+
+    def test_recovers_known_scale(self):
+        tracks, rings = synthetic_rig(noise=0.1)
+        result = scale.best_effort_scale(tracks, rings, self.PAIR, BAR_MM)
+        assert result["scale_mm_per_model_unit"] == pytest.approx(
+            1.0 / UNITS_PER_MM, rel=1e-3)
+        assert result["support"]["rings"] == 3
+        assert result["relative_mad"] < 0.005
+
+    def test_recovers_from_sparse_observations(self):
+        # Only every third view observes the bar: the gated window protocol would
+        # starve at 16 observations per 24-view window, the pooled spans still
+        # measure it.
+        tracks, rings = synthetic_rig(
+            noise=0.1, drop=lambda ring, view, code: view % 3 != 0)
+        result = scale.best_effort_scale(tracks, rings, self.PAIR, BAR_MM)
+        assert result["scale_mm_per_model_unit"] == pytest.approx(
+            1.0 / UNITS_PER_MM, rel=1e-3)
+
+    def test_recovers_large_noisy_bar(self):
+        tracks, rings = synthetic_rig(noise=2.5, seed=1)
+        result = scale.best_effort_scale(tracks, rings, self.PAIR, BAR_MM)
+        assert result["scale_mm_per_model_unit"] == pytest.approx(
+            1.0 / UNITS_PER_MM, rel=1e-2)
+
+    def test_minimal_evidence_still_estimates(self):
+        # A single short run of views in one ring is enough to report an estimate;
+        # the thin support stays visible in the support fields.
+        tracks, rings = synthetic_rig(
+            noise=0.1, drop=lambda ring, view, code: ring != 0 or view > 6)
+        result = scale.best_effort_scale(tracks, rings, self.PAIR, BAR_MM)
+        assert result["scale_mm_per_model_unit"] == pytest.approx(
+            1.0 / UNITS_PER_MM, rel=1e-2)
+        assert result["support"]["rings"] == 1
+
+    def test_no_evidence_reports_none(self):
+        tracks, rings = synthetic_rig(
+            noise=0.1, drop=lambda ring, view, code: code == "A1")
+        result = scale.best_effort_scale(tracks, rings, self.PAIR, BAR_MM)
+        assert result["scale_mm_per_model_unit"] is None
+        assert result["support"]["spans"] == 0
+
+    def test_invalid_length_rejected(self):
+        tracks, rings = synthetic_rig(noise=0.1)
+        with pytest.raises(ValueError, match="bar length"):
+            scale.best_effort_scale(tracks, rings, self.PAIR, 0.0)
 
 
 class TestApplyScale:
@@ -256,3 +341,5 @@ class TestApplyScale:
         scale.apply_scale(source, destination, 2.0)
         with pytest.raises(FileExistsError):
             scale.apply_scale(source, destination, 2.0)
+
+
