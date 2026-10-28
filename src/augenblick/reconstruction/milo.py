@@ -43,7 +43,7 @@ def tetranerf_installed() -> bool:
 class MiloConfig(EvalParams, ResolutionParams):
     """Training and mesh-extraction parameters forwarded to MILo."""
 
-    densification: Literal["regular", "fast"] = field(default="regular", metadata={
+    densification: Literal["regular", "fast"] = field(default="fast", metadata={
         "help": "regular: RaDe-GS densification, upstream's object-centric recipe; "
                 "fast: Mini-Splatting2, the paper's scene recipe"})
     iterations: Optional[int] = field(default=None, metadata={
@@ -66,7 +66,7 @@ class MiloConfig(EvalParams, ResolutionParams):
     lambda_mask: float = field(default=0.1, metadata={
         "help": "Rendered-alpha vs mask loss weight, on for parity with 2DGS/GW; 0 disables"})
     white_background: bool = field(default=False, metadata={"help": "Use white background"})
-    extract: Literal["sdf", "tsdf"] = field(default="sdf", metadata={
+    extract: Literal["sdf", "tsdf"] = field(default="tsdf", metadata={
         "help": "sdf: MILo's refined Delaunay mesh; tsdf: regular-grid TSDF of rendered depth"})
     refine_iter: int = field(default=1000, metadata={
         "help": "sdf: SDF refinement iterations before the final marching tetrahedra"})
