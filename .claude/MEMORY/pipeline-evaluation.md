@@ -13,7 +13,7 @@ module carries its own argparse main instead: `python -m augenblick.eval.{nvs,me
 ## Held-out split (`eval/split.py`)
 
 - `--eval` on a recon config comes from `EvalParams` in `reconstruction/base.py`, inherited by
-  `2dgs`, `pgsr` and `gw`. **`sugar` does not inherit it** and hardcodes `--eval False`, so it
+  `2dgs`, `pgsr`, `gw` and `geosvr`. **`sugar` does not inherit it** and hardcodes `--eval False`, so it
   has no `--eval` flag and produces no held-out metrics.
 - The first `--eval` run calls `write_split(scene.root)` → `<scene>/split.json`, holding out
   every 8th registered stem (`DEFAULT_HOLDOUT = 8`, the backends' shared `llffhold` rule). An
@@ -28,7 +28,8 @@ module carries its own argparse main instead: `python -m augenblick.eval.{nvs,me
 ## Novel-view metrics (`eval/nvs.py`, `eval/metrics.py`)
 
 Reads the PNG pairs under `<output>/test/ours_<iter>/{renders,gt}` (highest iteration unless
-`--iteration`) and writes `<output>/nvs_metrics.json`, recording `"metric_domain": "mask"`.
+`--iteration`; auto-pick also accepts GeoSVR's `ours_<iter>_r<res>` dirs, but an explicit
+`--iteration N` looks for `ours_N` verbatim and so misses them — omit it for GeoSVR) and writes `<output>/nvs_metrics.json`, recording `"metric_domain": "mask"`.
 Rescore without retraining:
 
 ```bash

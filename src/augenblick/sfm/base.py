@@ -1,5 +1,6 @@
 """Shared shape of the SfM methods, and the refiner variant that needs an existing model."""
 import logging
+import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,6 +9,18 @@ from augenblick.core.method import Method, SceneInputMixin, StageResult
 from augenblick.core.scene import Scene
 
 logger = logging.getLogger(__name__)
+
+
+def link_dir(src: Path, dst: Path) -> None:
+    """Symlink dst -> src, replacing a stale link left by an earlier run."""
+    # lexists, not exists: a link dangling from a moved scene still blocks os.symlink.
+    if dst.is_symlink():
+        dst.unlink()
+    elif os.path.lexists(dst):
+        logger.warning("%s exists and is not a symlink; leaving it in place", dst)
+        return
+    os.symlink(src, dst)
+    logger.info("Linked %s -> %s", dst, src)
 
 
 @dataclass

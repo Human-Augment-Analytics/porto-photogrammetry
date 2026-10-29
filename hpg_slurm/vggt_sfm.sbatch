@@ -29,9 +29,13 @@ if [ ! -f "$SLURM_DIR/common.sh" ]; then
 fi
 source "$SLURM_DIR/common.sh"
 
+# SFM_TAG names the output dir and the timing/RESULT method
+# (e.g. SFM_TAG=vggt-p50 with --conf_perc_thresh 50)
+SFM_TAG="${SFM_TAG:-vggt}"
+
 discover_scenes
 select_scene
-OUT="$RESULT_ROOT/$SCENE_NAME/vggt"
+OUT="$RESULT_ROOT/$SCENE_NAME/$SFM_TAG"
 mkdir -p "$OUT"
 
 N_IMAGES=$(ls -1 "$SCENE/images" 2>/dev/null | wc -l)
@@ -41,9 +45,9 @@ echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]}) -> $OUT"
 echo "images     : $N_IMAGES"
 
 # Machine-readable marker for log scraping; keep the prefix and fields stable.
-echo "SCENE_INFO scene=$SCENE_NAME sfm=vggt images=$N_IMAGES masks=$N_MASKS"
+echo "SCENE_INFO scene=$SCENE_NAME sfm=$SFM_TAG images=$N_IMAGES masks=$N_MASKS"
 
 # One CSV row per scene, written even if the job dies.
-start_timing "$SCENE_NAME" "$N_IMAGES" vggt
+start_timing "$SCENE_NAME" "$N_IMAGES" "$SFM_TAG"
 
 augenblick sfm vggt --scene "$SCENE" --output "$OUT" "$@"

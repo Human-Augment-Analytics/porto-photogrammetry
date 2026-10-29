@@ -12,10 +12,12 @@ roots) — the job logic is identical.
 MASK_METHOD=rembg sbatch hpg_slurm/mask.sbatch
 sbatch hpg_slurm/vggt_sfm.sbatch
 sbatch hpg_slurm/vggt_ba_sfm.sbatch
+sbatch hpg_slurm/dvlt_sfm.sbatch                # RTX only
 sbatch hpg_slurm/colmap_sfm.sbatch
 SFM=colmap sbatch hpg_slurm/turntable_sfm.sbatch
 SFM=colmap sbatch hpg_slurm/hull_sfm.sbatch
 BACKEND=2dgs SFM=vggt sbatch hpg_slurm/recon.sbatch
+BACKEND=geosvr SFM=colmap sbatch --mem=128gb hpg_slurm/recon.sbatch   # GeoSVR: see Gotchas
 sbatch hpg_slurm/meshroom_benchmark.sbatch          # baseline; needs the Meshroom frontend
 ```
 
@@ -26,10 +28,21 @@ GPU=rtx6000 sbatch hpg_slurm/setup_env.sbatch
 GPU=b200 sbatch --partition=hpg-b200 hpg_slurm/setup_env.sbatch
 ```
 
-`recon.sbatch` takes `BACKEND=2dgs|sugar|pgsr|gw` and `SFM=<name>` to pick its input SfM;
-`turntable_sfm.sbatch` and `hull_sfm.sbatch` take `SFM=` too and run that SfM first if its
-output is missing. Scenes are sorted, so an array index maps to the same scene across
-submissions. Extra flags are forwarded to the `augenblick` CLI.
+`recon.sbatch` takes `BACKEND=2dgs|sugar|pgsr|gw|geosvr` and `SFM=<name>` to pick its input
+SfM (`$RESULT_ROOT/<scene>/<name>`), and exits early if that scene's `sparse/0` is missing or
+empty. `turntable_sfm.sbatch` and `hull_sfm.sbatch` take `SFM=colmap|vggt|vggt_ba` (default
+`colmap`) and run that SfM first if its output is missing. Scenes are sorted, so an array index
+maps to the same scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
+
+`vggt_sfm`, `vggt_ba_sfm` and `dvlt_sfm` take `SFM_TAG=` (default `vggt`, `vggt_ba`, `dvlt`),
+which names the output dir and the timing method, so runs with different flags coexist:
+
+```bash
+SFM_TAG=vggt-p50 sbatch hpg_slurm/vggt_sfm.sbatch --conf_perc_thresh 50
+BACKEND=2dgs SFM=vggt-p50 sbatch hpg_slurm/recon.sbatch
+```
+
+`dvlt_sfm.sbatch` runs only with `GPU=rtx6000`: the B200 env does not carry DVLT.
 
 `mask.sbatch` produces the silhouettes the hull and masked-COLMAP paths need, writing a
 scene-shaped `images/` + `masks/` pair the SfM jobs consume directly. Output goes to
@@ -59,11 +72,12 @@ For anything not covered, copy `template.sbatch` and edit its command block.
 | `template.sbatch` | Copy-and-edit starting point |
 | `mask.sbatch` | `MASK_METHOD=rembg\|threshold\|sam3`; consumes `<scene>/images`, emits a scene |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |
-| `vggt_ba_sfm.sbatch` | Same with `--use_ba` |
+| `vggt_ba_sfm.sbatch` | Same with `--use_ba`; writes `<scene>/vggt_ba` |
+| `dvlt_sfm.sbatch` | DVLT -> COLMAP (feed-forward, no BA), one array task per scene; RTX env only |
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |
-| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw`, `SFM=<name>` picks the input SfM |
+| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw\|geosvr`, `SFM=<name>` picks the input SfM |
 | `meshroom_benchmark.sbatch` | Meshroom baseline |
 | `setup_env.sbatch` | Builds `augenblick_<card>` on a node of that GPU |
 | `prepare_neurips.sbatch` | Flattens raw NeurIPS objects into `<scene>/{images,masks}` |
@@ -148,7 +162,7 @@ method,scene,gpu,n_images,seconds,exit_code,note,jobid,node,finished
 `HOST_OOM`, `KILLED_OR_TIMEOUT` or `FAILED`. The `gpu` column records the hardware **actually
 allocated**, not the `GPU=` target — on a MIG node it reads `<model>_<profile>`.
 
-The three SfM jobs also echo two machine-readable lines per task, for scraping a run summary
+The `colmap`, `vggt`, `vggt_ba` and `dvlt` jobs also echo two machine-readable lines per task, for scraping a run summary
 out of the logs without re-reading the CSV:
 
 ```
@@ -214,3 +228,6 @@ sacct -j <jobid> --format=JobID,JobName,State,Elapsed,MaxRSS
 - **2DGS TSDF extraction needs far more than 64 gb** at `--mesh_res 4096` on a ~660-image scene
   (97 GiB RSS, oom_killed). Nodes carry 515-2063 gb, so raise `--mem` freely. A host-RAM OOM
   reads as `OUT_OF_MEMORY` / `-9` with a `Detected 1 oom_kill event` line — not a CUDA OOM.
+- **GeoSVR needs `--mem=128gb` on large scenes.** It holds every decoded image and mask in host
+  RAM: 432 × 24 MP views peaked at ~71 GiB and were OOM-killed at 64 gb. Its Depth-Anything-V2
+  weights are pre-fetched into the `/blue` `HF_HOME` that `common.sh` exports.

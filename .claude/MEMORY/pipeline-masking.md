@@ -116,6 +116,6 @@ Runs against the per-GPU `augenblick_*` env like every other stage — `rembg` a
 A masking job should still guard against silent CPU fallback, since ORT reports the CUDA
 provider as available even when it cannot load it. See cluster-slurm.md and environment-and-gpu.md.
 
-`pace_slurm/mask.sbatch` takes `MASK_METHOD=rembg|threshold|sam3`. For `sam3` it preflights
+Both clusters' `mask.sbatch` take `MASK_METHOD=rembg|threshold|sam3`. For `sam3` it preflights
 CUDA, because the method cannot fall back to CPU. That preflight is now optional:
 `augenblick mask sam3` itself exits 2 from `prepare()` when there is no CUDA device, or when the checkpoint is gated or missing from an offline cache (`GatedRepoError`, `LocalEntryNotFoundError`). The checkpoint lands in `$HF_HOME`, which `common.sh` exports for every job (see cluster-slurm.md).

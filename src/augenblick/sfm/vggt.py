@@ -17,7 +17,7 @@ from typing import ClassVar
 
 from augenblick.core.registry import register_sfm
 from augenblick.core.scene import Scene
-from augenblick.sfm.base import SfMMethod, SfMResult
+from augenblick.sfm.base import SfMMethod, SfMResult, link_dir
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +38,12 @@ class VGGTConfig:
                 "silhouette seam detectors fire on (0 disables)"})
     seed: int = field(default=42, metadata={"help": "Random seed for reproducibility"})
     use_ba: bool = field(default=False, metadata={"help": "Use BA for reconstruction"})
-    max_reproj_error: float = field(default=8.0, metadata={
+    max_reproj_error: float = field(default=32.0, metadata={
         "help": "Maximum reprojection error for reconstruction"})
-    min_inlier_per_frame: int = field(default=64, metadata={
+    min_inlier_per_frame: int = field(default=16, metadata={
         "help": "Surviving tracks a frame needs to take part in BA; frames below it are "
                 "dropped individually rather than aborting the reconstruction"})
-    min_valid_frames: float = field(default=0.3, metadata={
+    min_valid_frames: float = field(default=0.6, metadata={
         "help": "Fraction of frames that must clear --min_inlier_per_frame, or BA is skipped "
                 "entirely"})
     shared_camera: bool = field(default=False, metadata={
@@ -51,16 +51,17 @@ class VGGTConfig:
     camera_type: str = field(default="SIMPLE_PINHOLE", metadata={
         "help": "Camera type for reconstruction"})
     vis_thresh: float = field(default=0.2, metadata={"help": "Visibility threshold for tracks"})
-    query_frame_num: int = field(default=12, metadata={"help": "Number of frames to query"})
+    query_frame_num: int = field(default=24, metadata={"help": "Number of frames to query"})
     max_query_pts: int = field(default=4096, metadata={
         "help": "Maximum number of query points. The BA inlier floor counts surviving tracks "
                 "per frame absolutely, so masked scenes need a large budget to clear it"})
     fine_tracking: bool = field(default=True, metadata={
         "help": "Use fine tracking (slower but more accurate)"})
-    conf_thres_value: float = field(default=2.0, metadata={
-        "help": "Minimum VGGT depth confidence, applied in both modes: without --use_ba it "
-                "selects which depth pixels become 3D points; with --use_ba the tracker "
-                "samples the same map at each query point and drops those below it"})
+    conf_perc_thresh: float = field(default=25.0, metadata={
+        "help": "Percentile (0-100) of VGGT depth confidence, over unmasked pixels, below "
+                "which pixels are dropped, applied in both modes: without --use_ba it selects "
+                "which depth pixels become 3D points; with --use_ba the tracker samples the "
+                "same map at each query point and drops those below it"})
 
 
 def run_VGGT(model, images, masks, dtype, resolution=518):
@@ -158,18 +159,6 @@ def rename_colmap_recons_and_rescale_camera(
     return reconstruction
 
 
-def _link_dir(src: Path, dst: Path) -> None:
-    """Symlink dst -> src, replacing a stale link left by an earlier run."""
-    # lexists, not exists: a link dangling from a moved scene still blocks os.symlink.
-    if dst.is_symlink():
-        dst.unlink()
-    elif os.path.lexists(dst):
-        logger.warning("%s exists and is not a symlink; leaving it in place", dst)
-        return
-    os.symlink(src, dst)
-    logger.info("Linked %s -> %s", dst, src)
-
-
 @register_sfm
 class VGGTSfM(SfMMethod):
     """Runs the VGGT network and converts its output into a COLMAP reconstruction."""
@@ -211,6 +200,8 @@ class VGGTSfM(SfMMethod):
 
         self.validate(scene)
         args = self.config
+        if not 0.0 <= args.conf_perc_thresh <= 100.0:
+            raise ValueError(f"--conf_perc_thresh must be in [0, 100], got {args.conf_perc_thresh}")
         input_dir = str(scene.root)
         out_dir_str = str(output_dir)
 
@@ -292,6 +283,14 @@ class VGGTSfM(SfMMethod):
             vggt_time = time.time() - t0
             logger.info(f"VGGT inference completed in {vggt_time:.1f}s")
 
+            # Masking zeroes depth_conf outside the subject, so percentile is
+            # taken over surviving pixels only.
+            valid_conf = depth_conf > 0
+            if not valid_conf.any():
+                raise ValueError("Masks leave no pixels with positive depth confidence")
+            conf_thresh = float(np.percentile(depth_conf[valid_conf], args.conf_perc_thresh))
+            logger.info(f"Confidence p{args.conf_perc_thresh:g} = {conf_thresh:.3g}")
+
             if args.use_ba:
                 t0 = time.time()
                 image_size = np.array(images.shape[-2:])
@@ -334,7 +333,7 @@ class VGGTSfM(SfMMethod):
                         query_frame_num=args.query_frame_num,
                         keypoint_extractor="aliked+sp",
                         fine_tracking=args.fine_tracking,
-                        conf_thresh=args.conf_thres_value
+                        conf_thresh=conf_thresh
                     )
 
                     torch.cuda.empty_cache()
@@ -387,7 +386,7 @@ class VGGTSfM(SfMMethod):
                 # (S, H, W, 3), with x, y coordinates and frame indices
                 points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
 
-                conf_mask = depth_conf >= args.conf_thres_value
+                conf_mask = valid_conf & (depth_conf >= conf_thresh)
                 conf_mask = randomly_limit_trues(conf_mask, max_points_for_colmap)
 
                 points_3d = points_3d[conf_mask]
@@ -425,9 +424,9 @@ class VGGTSfM(SfMMethod):
             trimesh.PointCloud(points_3d, colors=points_rgb).export(
                 os.path.join(out_dir_str, "sparse/0/points.ply"))
 
-            _link_dir(scene.images_dir, output_dir / "images")
+            link_dir(scene.images_dir, output_dir / "images")
             if scene.has_masks():
-                _link_dir(scene.masks_dir, output_dir / "masks")
+                link_dir(scene.masks_dir, output_dir / "masks")
 
             total_time = time.time() - t_start
             logger.info("=" * 60)
