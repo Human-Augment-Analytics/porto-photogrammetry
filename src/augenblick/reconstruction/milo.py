@@ -43,7 +43,7 @@ def tetranerf_installed() -> bool:
 class MiloConfig(EvalParams, ResolutionParams):
     """Training and mesh-extraction parameters forwarded to MILo."""
 
-    densification: Literal["regular", "fast"] = field(default="fast", metadata={
+    densification: Literal["regular", "fast"] = field(default="regular", metadata={
         "help": "regular: RaDe-GS densification, upstream's object-centric recipe; "
                 "fast: Mini-Splatting2, the paper's scene recipe"})
     iterations: Optional[int] = field(default=None, metadata={
