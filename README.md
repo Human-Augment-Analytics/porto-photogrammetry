@@ -396,6 +396,12 @@ gates and an end-to-end walkthrough (detection, the bar codebook, scaling, scori
 [docs/scale-protocol.md](docs/scale-protocol.md); the HiPerGator stages are
 `hpg_slurm/scale_markers.sbatch` and `hpg_slurm/geometry_eval.sbatch`.
 
+To run the whole chain reproducibly over a collection, rather than a specimen at a time,
+see [docs/benchmark-trees.md](docs/benchmark-trees.md). `workflow/Snakefile` fills a
+benchmark tree stage by stage and records what every result was derived from; the stages
+are joined by content digests rather than timestamps, so a deterministic rerun that
+changes nothing costs nothing.
+
 ### Output
 
 | Method | Output files | Location |

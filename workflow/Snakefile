@@ -1,0 +1,262 @@
+# Benchmark workflow; see docs/benchmark-trees.md for usage.
+import json
+from pathlib import Path
+
+TREE = Path(config["tree"]).resolve()
+CONF = json.loads((TREE / "config.json").read_text())
+REPO = Path(CONF["repo"])
+PYTHON = config.get("python", "python")
+# Use the console script from the configured Python environment.
+AUGENBLICK = (str(Path(PYTHON).parent / "augenblick")
+              if PYTHON != "python" else "augenblick")
+
+SPECIMENS = CONF["roster"]["keep"]
+REFERENCES = CONF.get("references", {})
+PAIRED = sorted(REFERENCES)
+MODEL_STAGE = CONF.get("scale_model_stage", "sfm")
+SPLIT = CONF.get("split")
+
+# Backend mesh paths can be overridden by the tree config.
+MESH_PATHS = {
+    "2dgs": "train/ours_30000/fuse_post.ply",
+    "pgsr": "mesh/tsdf_fusion_post.ply",
+    "gw": "mesh_ours_2pivots_post.ply",
+}
+MESH_PATHS.update(CONF.get("mesh_paths", {}))
+
+# Trainable backends must support held-out evaluation.
+BACKENDS = CONF.get("backends") or [CONF.get("backend", "2dgs")]
+TRAINS = bool(CONF.get("train"))
+
+_recipes = TREE / CONF.get("recipes", "recipes.json")
+RECIPES = json.loads(_recipes.read_text()) if _recipes.is_file() else {}
+
+# Pin imports to this checkout.
+shell.prefix(f"set -euo pipefail; export PYTHONPATH={REPO}/src; ")
+
+
+def scene(specimen):
+    return TREE / MODEL_STAGE / specimen
+
+
+def model(specimen):
+    return scene(specimen) / "sparse" / "0"
+
+
+def mesh_of(backend, specimen):
+    return TREE / backend / specimen / MESH_PATHS.get(backend, MESH_PATHS["2dgs"])
+
+
+def has_model(specimen):
+    return model(specimen).is_dir()
+
+
+def recipe_arguments(specimen):
+    """The estimator's bar arguments, from the tree's hand-verified codebook.
+
+    The codes do not determine the bar length, so a wrong length here is an undetectable
+    factor-of-two; it is required rather than defaulted for that reason.
+    """
+    recipe = RECIPES[specimen]
+    arguments = ["--primary", *recipe["primary"],
+                 "--known-length-mm", str(recipe["known_length_mm"]),
+                 "--allow-unregistered"]
+    if recipe.get("check"):
+        arguments += ["--check", *recipe["check"]]
+    return " ".join(str(a) for a in arguments)
+
+
+# Evaluate existing meshes or models scheduled for training.
+SCALEABLE = [s for s in SPECIMENS if s in RECIPES and has_model(s)]
+SPLITTABLE = [s for s in SPECIMENS if SPLIT and has_model(s)]
+SCOREABLE = {b: [s for s in PAIRED
+                 if (TRAINS or mesh_of(b, s).is_file()) and s in SCALEABLE]
+             for b in BACKENDS}
+# Novel-view scores need views the model never saw, so they exist only under a split.
+VIEWABLE = {b: [s for s in SPECIMENS if TRAINS and SPLIT and has_model(s)]
+            for b in BACKENDS}
+
+
+rule all:
+    input:
+        expand("{t}/scales/{s}/scale.stamp", t=TREE, s=SCALEABLE),
+        expand("{t}/splits/{s}/split.stamp", t=TREE, s=SPLITTABLE),
+        [f"{TREE}/eval/{b}/{s}/geometry.stamp"
+         for b in BACKENDS for s in SCOREABLE[b]],
+        [f"{TREE}/nvs/{b}/{s}/nvs.stamp" for b in BACKENDS for s in VIEWABLE[b]],
+
+
+rule markers:
+    """Detect scale-bar markers in unmasked photographs."""
+    input:
+        images=lambda w: TREE / "inputs" / "images" / w.specimen,
+    output:
+        detections=TREE / "markers" / "{specimen}" / "detections.json",
+        stamp=TREE / "markers" / "{specimen}" / "detections.stamp",
+    params:
+        toolkit=f"--toolkit {CONF['toolkit']}" if CONF.get("toolkit") else "",
+    resources:
+        mem_mb=10000, runtime=240, cpus_per_task=4,
+    shell:
+        "rm -f {output.detections} && "
+        "{PYTHON} -m augenblick.eval.detect --images {input.images} "
+        "  --output {output.detections} {params.toolkit} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {output.detections} "
+        "  --out {output.stamp} --repo {REPO} --input images={input.images}"
+
+
+rule scales:
+    """Estimate scale; rejected estimates still produce a result record."""
+    input:
+        detections=TREE / "markers" / "{specimen}" / "detections.stamp",
+        model=lambda w: model(w.specimen),
+    output:
+        scale=TREE / "scales" / "{specimen}" / "scale.json",
+        stamp=TREE / "scales" / "{specimen}" / "scale.stamp",
+    params:
+        scene=lambda w: scene(w.specimen),
+        detections=lambda w: TREE / "markers" / w.specimen / "detections.json",
+        bar=lambda w: recipe_arguments(w.specimen),
+    resources:
+        mem_mb=10000, runtime=120, cpus_per_task=4,
+    shell:
+        "rm -f {output.scale} && "
+        "({PYTHON} -m augenblick.eval.scale --model {input.model} "
+        "  --scene {params.scene} --detections {params.detections} {params.bar} "
+        "  --json-out {output.scale} || true) && "
+        "test -f {output.scale} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {output.scale} "
+        "  --out {output.stamp} --repo {REPO} --input model={input.model} "
+        "  --input detections={params.detections}"
+
+
+rule splits:
+    """Write or validate the configured view split."""
+    input:
+        model=lambda w: model(w.specimen),
+    output:
+        split=TREE / "splits" / "{specimen}" / "split.json",
+        stamp=TREE / "splits" / "{specimen}" / "split.stamp",
+    params:
+        rule=SPLIT or "",
+        manual=lambda w: TREE / CONF.get("manual_splits", "splits_manual") / w.specimen
+                         / "split.json",
+    resources:
+        mem_mb=4000, runtime=30, cpus_per_task=1,
+    shell:
+        "{PYTHON} -m augenblick.eval.split --model {input.model} "
+        "  --rule {params.rule} --manual {params.manual} --out {output.split} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {output.split} "
+        "  --out {output.stamp} --repo {REPO} --input model={input.model}"
+
+
+rule train:
+    """Train in a staged scene; --eval enables the configured split."""
+    input:
+        model=lambda w: model(w.specimen),
+        split=lambda w: ([TREE / "splits" / w.specimen / "split.stamp"] if SPLIT else []),
+    output:
+        stamp=TREE / "{backend}" / "{specimen}" / "model.stamp",
+    params:
+        scene=lambda w: TREE / "work" / "scenes" / w.specimen,
+        sfm=lambda w: TREE / MODEL_STAGE / w.specimen,
+        out=lambda w: TREE / w.backend / w.specimen,
+        mesh=lambda w: mesh_of(w.backend, w.specimen),
+        split=lambda w: TREE / "splits" / w.specimen / "split.json",
+        eval_flag="--eval" if SPLIT else "",
+    wildcard_constraints:
+        backend="|".join(BACKENDS),
+    resources:
+        mem_mb=128000, runtime=240, cpus_per_task=8,
+        slurm_extra="--partition=hpg-rtx6000 --gpus=1",
+    shell:
+        "mkdir -p {params.scene} && "
+        "for part in images masks masks_colmap sparse; do "
+        "  rm -f {params.scene}/$part; "
+        "  test -e {params.sfm}/$part && ln -s {params.sfm}/$part {params.scene}/$part; "
+        "done; "
+        "if [ -n '{params.eval_flag}' ]; then cp {params.split} {params.scene}/split.json; "
+        "else rm -f {params.scene}/split.json; fi && "
+        "{AUGENBLICK} recon {wildcards.backend} --scene {params.scene} "
+        "  --output {params.out} {params.eval_flag} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {params.mesh} "
+        "  --out {output.stamp} --repo {REPO} --input model={input.model} "
+        "  --input split={params.split}"
+
+
+rule nvs:
+    """Score the held-out renders."""
+    input:
+        model=lambda w: TREE / w.backend / w.specimen / "model.stamp",
+    output:
+        metrics=TREE / "nvs" / "{backend}" / "{specimen}" / "nvs_metrics.json",
+        stamp=TREE / "nvs" / "{backend}" / "{specimen}" / "nvs.stamp",
+    params:
+        scene=lambda w: TREE / "work" / "scenes" / w.specimen,
+        out=lambda w: TREE / w.backend / w.specimen,
+        split=lambda w: TREE / "splits" / w.specimen / "split.json",
+    wildcard_constraints:
+        backend="|".join(BACKENDS),
+    resources:
+        mem_mb=32000, runtime=120, cpus_per_task=4,
+        slurm_extra="--partition=hpg-rtx6000 --gpus=1",
+    shell:
+        "{PYTHON} -m augenblick.eval.nvs --scene {params.scene} --output {params.out} && "
+        "cp {params.out}/nvs_metrics.json {output.metrics} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {output.metrics} "
+        "  --out {output.stamp} --repo {REPO} --input split={params.split}"
+
+
+rule metric_mesh:
+    """Check model lineage and export a metric mesh."""
+    input:
+        scale=TREE / "scales" / "{specimen}" / "scale.stamp",
+        # Depend on a produced model stamp or an adopted mesh.
+        mesh=lambda w: ([TREE / w.backend / w.specimen / "model.stamp"] if TRAINS
+                        else [mesh_of(w.backend, w.specimen)]),
+        model=lambda w: model(w.specimen),
+    output:
+        metric=TREE / "eval" / "{backend}" / "{specimen}" / "mesh_mm.ply",
+    params:
+        mesh=lambda w: mesh_of(w.backend, w.specimen),
+        cameras=lambda w: TREE / w.backend / w.specimen / "cameras.json",
+        scale=lambda w: TREE / "scales" / w.specimen / "scale.json",
+    wildcard_constraints:
+        backend="|".join(BACKENDS),
+    resources:
+        mem_mb=24000, runtime=60, cpus_per_task=2,
+    shell:
+        "{PYTHON} -m augenblick.eval.metric_mesh --mesh {params.mesh} "
+        "  --cameras {params.cameras} --model {input.model} --scale {params.scale} "
+        "  --out {output.metric}"
+
+
+rule geometry:
+    """Evaluate the metric mesh against its reference."""
+    input:
+        metric=TREE / "eval" / "{backend}" / "{specimen}" / "mesh_mm.ply",
+        reference=lambda w: (TREE / "inputs" / "gt_artec" / w.specimen
+                             / REFERENCES[w.specimen]),
+    output:
+        rigid=TREE / "eval" / "{backend}" / "{specimen}" / "geometry_rigid_scores.json",
+        similarity=(TREE / "eval" / "{backend}" / "{specimen}"
+                    / "geometry_similarity_scores.json"),
+        stamp=TREE / "eval" / "{backend}" / "{specimen}" / "geometry.stamp",
+    params:
+        scale=lambda w: TREE / "scales" / w.specimen / "scale.json",
+    wildcard_constraints:
+        backend="|".join(BACKENDS),
+    resources:
+        mem_mb=24000, runtime=180, cpus_per_task=4,
+    shell:
+        "rm -f {output.similarity} {output.rigid} && "
+        "{PYTHON} -m augenblick.eval.mesh --ours {input.metric} "
+        "  --reference {input.reference} --samples 100000 --seeds 0 1 2 "
+        "  --json-out {output.similarity} && "
+        "{PYTHON} -m augenblick.eval.mesh --ours {input.metric} "
+        "  --reference {input.reference} --samples 100000 --seeds 0 1 2 "
+        "  --rigid --absolute-tolerances 0.25 0.5 1.0 --json-out {output.rigid} && "
+        "{PYTHON} -m augenblick.bench.stamp --artefact {output.similarity} "
+        "  --artefact {output.rigid} --out {output.stamp} --repo {REPO} "
+        "  --input mesh={input.metric} --input reference={input.reference} "
+        "  --input scale={params.scale}"
