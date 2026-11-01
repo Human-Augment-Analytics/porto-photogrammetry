@@ -51,10 +51,11 @@ Both dirs carry the same set unless a row says otherwise.
 | `mask.sbatch` | `MASK_METHOD=rembg\|threshold\|sam3`; consumes `<scene>/images`, emits a scene. `sam3` preflights CUDA |
 | `vggt_sfm.sbatch` | VGGT -> COLMAP, one array task per scene |
 | `vggt_ba_sfm.sbatch` | Same with `--use_ba` |
+| `dvlt_sfm.sbatch` | DVLT -> COLMAP; **HPG only**, refuses any `GPU` but `rtx6000` (the only env carrying DVLT) |
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |
-| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw`, `SFM=<name>` picks the input SfM |
+| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw\|geosvr`, `SFM=<name>` picks the input SfM |
 | `meshroom_benchmark.sbatch` | Meshroom baseline |
 | `setup_env.sbatch` | Builds `augenblick_<card>` on a node of that GPU; refuses an arch mismatch |
 | `prepare_neurips.sbatch` | Flattens raw NeurIPS objects into `<scene>/{images,masks}` (HPG only) |
@@ -65,7 +66,11 @@ differs, so it stays in the callers. They set `GPU` and `CONDA_ENV` first, and m
 `BANNER_EXTRA`.
 
 All jobs take `--scene`/`--output` built from the roots, not positionals, and forward `"$@"`
-to the CLI. Scenes are **sorted**, so an array index maps to the same scene across
+to the CLI. `turntable_sfm`/`hull_sfm` take `SFM=colmap|vggt|vggt_ba` (default `colmap`) and run
+that SfM first when its output is missing. On HPG, `vggt_sfm`, `vggt_ba_sfm` and `dvlt_sfm`
+also take `SFM_TAG=` (default the method name), which names both the output dir and the timing
+method, so runs with different flags (`SFM_TAG=vggt-p50 ... --conf_perc_thresh 50`) sit side
+by side; `recon.sbatch`'s `SFM=` then selects that tag. Scenes are **sorted**, so an array index maps to the same scene across
 submissions — hence discovery must skip none: it matches `images/` with `-type d -o -xtype d`,
 since a symlinked `images/` would drop the scene and shift every later index.
 
@@ -115,7 +120,8 @@ columns and the MIG caveat: either dir's `README.md`. Notes are `UNSUPPORTED_ARC
 `HOST_OOM`, `KILLED_OR_TIMEOUT` or `FAILED`.
 
 On HPG the same hook also prints a `RESULT scene=... sfm=... exit=... seconds=...` line, which
-pairs with the `SCENE_INFO` line the three SfM jobs echo so a run summary can be scraped from
+pairs with the `SCENE_INFO` line the four feed-forward/COLMAP SfM jobs echo (`colmap`, `vggt`,
+`vggt_ba`, `dvlt`) so a run summary can be scraped from
 the logs. That is why `start_timing` takes an optional third argument (the method) there: one
 trap emitting both the CSV row and the marker, rather than two racing to be the EXIT handler.
 
@@ -139,8 +145,13 @@ partition or gres; pass those too.
 | PACE | `a100` (default) | `augenblick_a100` | `cuda/12.9.1` | 8.0 |
 | PACE | `l40s` | `augenblick_l40s` | `cuda/12.9.1` | 8.9 |
 | PACE | `a40` | `augenblick_a40` | `cuda/12.9.1` | 8.6 |
+| PACE | `h100` / `h200` | `augenblick_h100` / `augenblick_h200` | `cuda/12.9.1` | 9.0 |
+| PACE | `rtx_pro_6000` | `augenblick_rtx_pro_6000` | `cuda/12.9.1` | 12.0 |
 
-Arch strings mirror `GPU_ARCH` in the matching `scripts/setup_<gpu>.sh`; `common.sh` exits 2 with a build hint if the env is absent. Note: `scripts/auto_setup.sh` maps compute cap 8.9 to `setup_l40s.sh`, which serves every Ada
+Arch strings mirror `GPU_ARCH` in the matching `scripts/setup_<gpu>.sh`; `common.sh` exits 2 with a build hint if the env is absent.
+PACE `h200` builds with `setup_h100.sh` (same sm_9.0), and `rtx_pro_6000` needs
+`--partition=ice-bw-gpu` as well as its gres. The HPG CUDA modules are the ones each env was
+*built* with, which no longer match the wrappers' `cuda/12.9.1` — see environment-and-gpu.md. Note: `scripts/auto_setup.sh` maps compute cap 8.9 to `setup_l40s.sh`, which serves every Ada
 sm_8.9 card (L40S, L40, RTX 6000 Ada) — the RTX 6000 Ada is a *different* card from the Blackwell RTX Pro 6000 on `hpg-rtx6000`.
 
 ## Deliberate choices
@@ -149,13 +160,16 @@ sm_8.9 card (L40S, L40, RTX 6000 Ada) — the RTX 6000 Ada is a *different* card
   `pycolmap` Python API from the conda env and never shells out, so no COLMAP binary is needed.
 - `module purge` first, since a batch shell inherits no `~/.bashrc`.
 - For the same reason `common.sh` exports `HF_HOME`/`TORCH_HOME` (both overridable) — to
-  `$HOME/scratch/` on PACE, `/blue/arthur.porto/srizvi63.gatech/cache/` on HPG. Without them every checkpoint-fetching job (VGGT ~4 GB, SAM 3 ~2 GB)
-  re-downloads into `$HOME/.cache`, against a 30 GB home quota.
+  `$HOME/scratch/` on PACE, `/blue/arthur.porto/srizvi63.gatech/cache/` on HPG. Without them
+  every checkpoint-fetching job (VGGT ~4 GB, SAM 3 ~2 GB, DVLT, GeoSVR's Depth-Anything-V2-Large
+  1.3 GB) re-downloads into `$HOME/.cache`, against a 30 GB home quota.
 - `conda activate` requires sourcing `conda.sh` first in a non-interactive shell.
-- `--mem` set explicitly (the interactive `salloc` let it default): 24 gb for SfM jobs, 64 gb for
-  reconstruction and the template. **64 gb is not enough for 2DGS mesh extraction on a ~660-image
+- `--mem` set explicitly (the interactive `salloc` let it default), per job: `turntable` 24 gb,
+  `mask` 32, `hull`/`dvlt` 48, `colmap`/`recon`/`meshroom`/`template` 64, `vggt`/`vggt_ba` 96
+  (PACE `setup_env` 10, HPG 64). **64 gb is not enough for 2DGS mesh extraction on a ~660-image
   scene** — TSDF at `--mesh_res 4096` peaked at 97 GiB RSS and was `oom_kill`ed at 64 gb; 192 gb
-  cleared it. Nodes here carry 515–2063 gb, so headroom is free. A host-RAM OOM reads as state
+  cleared it. **GeoSVR needs ~128 gb** on a 432 × 24 MP scene (peaks ~71 GiB holding every
+  decoded image and mask). Nodes here carry 515–2063 gb, so headroom is free. A host-RAM OOM reads as state
   `OUT_OF_MEMORY`, return code `-9`/SIGKILL and a `Detected 1 oom_kill event` line — **not** a
   CUDA OOM, and not a finding about the GPU.
 - **Slurm snapshots the batch script at submit time.** Editing an sbatch file after `sbatch`

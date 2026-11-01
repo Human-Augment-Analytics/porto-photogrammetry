@@ -2,8 +2,9 @@
 
 Batch equivalents of the manual `salloc` workflow, so runs survive a dropped SSH session.
 This is the **PACE ICE** set; `hpg_slurm/` holds the HiPerGator equivalents. The two differ
-only in cluster specifics (account, partition, gres, module names, conda root) — the job
-logic is identical.
+in cluster specifics (account, partition, gres, module names, conda root, data roots); the job
+logic is identical. HPG additionally carries `dvlt_sfm.sbatch`, `prepare_neurips.sbatch` and the
+`SFM_TAG`/`SCENE_INFO`/`RESULT` log markers; PACE has no DVLT job.
 
 ## Submit
 
@@ -18,14 +19,15 @@ SFM=colmap sbatch pace_slurm/hull_sfm.sbatch
 BACKEND=2dgs SFM=vggt sbatch pace_slurm/recon.sbatch
 ```
 
-`recon.sbatch` accepts `BACKEND=2dgs|sugar|pgsr|gw` and `SFM=<name>` to pick which SfM result
-feeds it; `turntable_sfm.sbatch` takes `SFM=` too and runs that SfM first if its output is
-missing. Scenes are discovered under `DATA_ROOT` and sorted, so an array index maps to the same
+`recon.sbatch` accepts `BACKEND=2dgs|sugar|pgsr|gw|geosvr` and `SFM=<name>` to pick which SfM
+result feeds it, and exits early if that scene's `sparse/0` is missing or empty.
+`turntable_sfm.sbatch` and `hull_sfm.sbatch` take `SFM=colmap|vggt|vggt_ba` (default `colmap`)
+and run that SfM first if its output is missing. Scenes are discovered under `DATA_ROOT` and sorted, so an array index maps to the same
 scene across submissions. Extra flags are forwarded to the `augenblick` CLI.
 
-`mask.sbatch` runs the masking stage and takes `MASK_METHOD=rembg|threshold` (default `rembg`)
-and `OUT_LAYOUT=nested|flat` (default `nested`). `nested` writes
-`$RESULT_ROOT/<method>/<scene>/` so the two methods coexist; `flat` writes straight to
+`mask.sbatch` runs the masking stage and takes `MASK_METHOD=rembg|threshold|sam3` (default
+`rembg`) and `OUT_LAYOUT=nested|flat` (default `nested`). `nested` writes
+`$RESULT_ROOT/<method>/<scene>/` so the methods coexist; `flat` writes straight to
 `$RESULT_ROOT/<scene>/`, which is convenient when `RESULT_ROOT` is already scoped to one run
 but means a second method silently overwrites the first.
 Unlike every other job here it consumes `<scene>/images` rather than a whole scene, and writes a
@@ -33,7 +35,8 @@ new scene-shaped output — an `images/` symlink plus `masks/`. Point the SfM jo
 directory to run them masked. It is the stage that *produces* masks, so it is the one job that does not need them
 present up front; `--only_missing` makes a requeued job resume where it stopped. The `rembg`
 method fails the job outright if onnxruntime cannot load its CUDA provider, rather than falling
-back to CPU at ~4x the cost. Its timing rows record the **scene** in the scene column, like
+back to CPU at ~4x the cost; `sam3` preflights CUDA, since it has no CPU path, and needs the
+gated `facebook/sam3` checkpoint in `$HF_HOME`. Its timing rows record the **scene** in the scene column, like
 every other job, and take the method from the `method` column — which is the Slurm job name. To
 tell two methods apart in one CSV, submit with a matching job name:
 `MASK_METHOD=threshold sbatch --job-name=mask-threshold pace_slurm/mask.sbatch`.
@@ -117,11 +120,11 @@ ICE picks the GPU model through **gres**, not a partition, so switching GPU mean
 
 ## Data layout
 
-`DATA_ROOT` and `RESULT_ROOT` are set in `common.sh` and default to paths inside the repo
+`DATA_ROOT` and `RESULT_ROOT` are set in `scene_common.sh` and default to paths inside the repo
 checkout (which lives on scratch), not to absolute cluster paths:
 
 ```
-DATA_ROOT   = $REPO_ROOT/data/main      # <scene>/prepared/{images,masks}
+DATA_ROOT   = $REPO_ROOT/data/main      # <scene>/prepared/{images,masks}, or flat <scene>/{images,masks}
 RESULT_ROOT = $REPO_ROOT/output         # <scene>/<sfm>[-<backend>]/
 ```
 
@@ -150,8 +153,10 @@ Recording the bare model there would compare a fraction of a Blackwell against a
 
 ## Picking a GPU
 
-`GPU=a100` (default), `l40s`, or `a40` selects the conda env, CUDA module, and arch string in `common.sh` (all three are `cuda/12.9.1` / torch 2.9.1). It does **not** change the gres —
-override that too:
+`GPU=a100` (default), `l40s`, `a40`, `h100`, `h200` or `rtx_pro_6000` selects the conda env,
+CUDA module and arch string in `common.sh` (all `cuda/12.9.1` / torch 2.9.1). It does **not**
+change the gres — override that too, and for `rtx_pro_6000` also pass
+`--partition=ice-bw-gpu`:
 
 ```bash
 GPU=l40s sbatch --gres=gpu:l40s:1 pace_slurm/vggt_sfm.sbatch
@@ -159,7 +164,10 @@ GPU=l40s sbatch --gres=gpu:l40s:1 pace_slurm/vggt_sfm.sbatch
 
 VGGT wants >= 80 GB VRAM on large scenes; the `a100` gres on ICE is the 80 GB PCIe model, so the default target is already appropriate. The reconstruction backends run fine on less.
 
-`augenblick_a100`, `augenblick_l40s`, and `augenblick_a40` are built and complete. `common.sh` fails with a build hint for a missing env.
+`augenblick_a100`, `augenblick_l40s`, and `augenblick_a40` are built and complete; the `h100`,
+`h200` and `rtx_pro_6000` envs are selectable but must be built first with
+`GPU=<name> sbatch --gres=gpu:<gres>:1 pace_slurm/setup_env.sbatch` (`h200` uses
+`setup_h100.sh`). `common.sh` fails with a build hint for a missing env.
 
 ### What's actually on the cluster
 
@@ -184,7 +192,7 @@ Three things that follow from the table:
 
 - **A100s are the scarce resource** — 8 in total, 2 per node, shared across four partitions. `l40s` (8/node, 48 GB) and `h200` (8/node, 141 GB) queue far faster per GPU.
 - **Never submit a bare `--gres=gpu:1`.** The `mi210` nodes are AMD/ROCm; every CUDA backend under `src/libs/` fails there. Always name the model.
-- **`rtx_pro_6000_blackwell` is sm_120** and lives on its own `ice-bw-gpu` partition. The CUDA submodules would need a rebuild against a Blackwell-capable toolchain in a separate env.
+- **`rtx_pro_6000_blackwell` is sm_120** and lives on its own `ice-bw-gpu` partition; it needs its own env (`GPU=rtx_pro_6000`), and one gres there is a MIG slice, not a card (see Timing rows).
 
 ## Logs and monitoring
 
@@ -200,6 +208,7 @@ sacct -j <jobid> --format=JobID,JobName,State,Elapsed,MaxRSS
 ## Gotchas
 
 - **`~/.bashrc` is not sourced in a batch job.** `common.sh` loads the modules explicitly; do not assume your interactive environment carries over.
+- **GeoSVR holds every decoded image and mask in host RAM.** 432 × 24 MP views peaked at ~71 GiB; submit `BACKEND=geosvr` with `--mem=128gb` on scenes that size.
 - **PACE has no `xerces` or `yasm` modules** (HiPerGator does). Nothing in the pipeline needs them, so the PACE `common.sh` simply omits them.
 - **CUDA is `cuda/12.9.1` everywhere** — PACE's default, what the envs are built against (torch 2.9.1+cu129), and what `common.sh` loads explicitly. One generation on purpose: `onnxruntime-gpu` links CUDA 12 sonames, so a cu130 torch leaves the masking stage's GPU provider unloadable. Keep the wrapper, the module load, and the torch index aligned when bumping any of them.
 - **COLMAP is intentionally not module-loaded.** Every SfM path drives the `pycolmap` Python API from the conda env, so no COLMAP binary is needed anywhere.
