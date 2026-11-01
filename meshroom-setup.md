@@ -64,6 +64,7 @@ cd "$MESHROOM_ROOT"
 conda create -n meshroom python=3.10
 conda activate meshroom
 pip install -r requirements.txt -r dev_requirements.txt
+pip install pycolmap==4.1.1
 ```
 
 ## 5. Verify

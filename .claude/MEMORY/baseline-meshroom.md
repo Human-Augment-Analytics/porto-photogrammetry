@@ -22,6 +22,32 @@ Installation and env-var setup: `meshroom-setup.md` (repo root) — it includes 
 
 RealityScan is the other (commercial) qualitative baseline, run outside this repo.
 
+## From COLMAP SfM (`--from_sfm`)
+
+```bash
+python baseline/benchmark_meshroom.py <colmap_scene> <output_dir> --from_sfm [--sparse sparse/0]
+```
+
+`baseline/colmap_to_sfmdata.py` (pycolmap, in the `meshroom` env) writes
+`<output_dir>/sfm/colmap.sfm`; `write_dense_graph()` strips CameraInit..StructureFromMotion from
+`photogrammetry.mg`, and `baseline/meshroom_run_graph.py` runs it (`meshroom_batch` requires a
+CameraInit to feed). Output layout and pruning match native mode. Facts behind the converter:
+
+- **SfMData 1.2.12.**
+- **One observation per view per landmark.** AliceVision keys observations by view, so COLMAP's
+  same-image duplicates are deduped by reprojection error (5,593 on UF_Mammals_1769_cranium).
+- **Tracks are required.** DepthMap picks neighbours only from shared landmarks, so DVLT and
+  VGGT without BA are rejected before any GPU work.
+- **Mask lookup tries `masks/<viewId>.png` before `<stem>.png`.** With numeric image names
+  that can load another image's mask; the converter fails on it. View paths stay unresolved
+  so the stem lookup matches symlinked images.
+- `Texturing:correctEV=False`: converted views carry no EXIF.
+- **Output meshes have Y and Z negated** relative to the SfM frame, native runs included:
+  AliceVision's `Mesh::save` flips them (`mesh/Mesh.cpp:136-137`). Registered `eval.mesh` absorbs
+  it; anything pairing a Meshroom mesh with COLMAP cameras unregistered must apply
+  `diag(1,-1,-1)` first. Verified on UF_Mammals_1769_cranium: sparse points to mesh, median
+  0.045% of the diagonal after the flip, 5.4% before.
+
 ## Running it on a cluster
 
 `pace_slurm/meshroom_benchmark.sbatch` sources `meshroom_common.sh`, not `common.sh`: the

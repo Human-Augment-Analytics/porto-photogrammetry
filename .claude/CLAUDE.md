@@ -61,7 +61,7 @@ question is how different SfM initialisations interact with each mesh extractor.
 | Masking | `augenblick mask {rembg,threshold,sam3}` — produces `masks/` from a flat images folder |
 | SfM | `augenblick sfm {vggt,dvlt,colmap,turntable,hull}` (VGGT takes `--use_ba`) |
 | Reconstruction | `augenblick recon {sugar,2dgs,pgsr,gw,geosvr,milo}` |
-| Baselines | Meshroom (`baseline/benchmark_meshroom.py`), RealityScan (external) |
+| Baselines | Meshroom (`baseline/benchmark_meshroom.py`; `--from_sfm` reuses a COLMAP scene), RealityScan (external) |
 | Evaluation | `python -m augenblick.eval.{nvs,mesh,scale}` — not on the `augenblick` CLI |
 
 Everything between the stages is a COLMAP scene: `images/` + optional `masks/` + `sparse/0/`.

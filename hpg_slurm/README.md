@@ -19,6 +19,7 @@ SFM=colmap sbatch hpg_slurm/hull_sfm.sbatch
 BACKEND=2dgs SFM=vggt sbatch hpg_slurm/recon.sbatch
 BACKEND=geosvr SFM=colmap sbatch --mem=128gb hpg_slurm/recon.sbatch   # GeoSVR: see Gotchas
 sbatch hpg_slurm/meshroom_benchmark.sbatch          # baseline; needs the Meshroom frontend
+SFM=colmap sbatch -J colmap-meshroom hpg_slurm/meshroom_benchmark.sbatch   # dense half on COLMAP's cameras
 ```
 
 Building an env is itself a job — the CUDA rasterizers must compile on the card they will run on:
@@ -78,7 +79,7 @@ For anything not covered, copy `template.sbatch` and edit its command block.
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |
 | `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw\|geosvr`, `SFM=<name>` picks the input SfM |
-| `meshroom_benchmark.sbatch` | Meshroom baseline |
+| `meshroom_benchmark.sbatch` | Meshroom baseline; `SFM=<name>` runs only its dense half on that SfM |
 | `setup_env.sbatch` | Builds `augenblick_<card>` on a node of that GPU |
 | `prepare_neurips.sbatch` | Flattens raw NeurIPS objects into `<scene>/{images,masks}` |
 
@@ -114,6 +115,11 @@ this; both HPG cards pass (`rtx6000` sm_120, `b200` sm_100).
 **One scene at a time (`--array=...%1`), deliberately.** `MeshroomCache` reaches ~50 GB for a
 663-image scene; `benchmark_meshroom.py` prunes it to the textured mesh after each success, so
 only one scene's intermediates ever exist.
+
+**`SFM=<name>` skips Meshroom's own SfM.** The job reads `$RESULT_ROOT/<scene>/<name>/`, passes
+`--from_sfm`, and writes `<name>-meshroom/` beside `<name>-2dgs/`; native `meshroom/` is untouched.
+The timing CSV's method column is the job name, so submit with `-J <name>-meshroom`; the job
+warns otherwise. The SfM must have tracks: DVLT and VGGT without BA exit 1 at conversion.
 
 ## Data layout
 

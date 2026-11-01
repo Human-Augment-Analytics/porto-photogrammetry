@@ -2,7 +2,8 @@
 """
 Run the Meshroom (AliceVision) photogrammetry baseline via meshroom_batch.
 
-Input: a directory of source images.
+Input: a directory of source images, or with --from_sfm a COLMAP scene whose cameras
+and tracks replace Meshroom's own SfM (only PrepareDenseScene onward runs).
 Output: Meshroom reconstruction artifacts in the output directory and an
 optional save file capturing the pipeline graph.
 
@@ -10,6 +11,8 @@ Usage:
     python baseline/benchmark_meshroom.py <input_images> <output_dir> \
         [--pipeline {photogrammetry,turntable}] [--save_file <path>] \
         [--meshroom_root <path>]
+    python baseline/benchmark_meshroom.py <colmap_scene> <output_dir> --from_sfm \
+        [--sparse sparse/0] [--save_file <path>] [--meshroom_root <path>]
 """
 import argparse
 import json
@@ -35,6 +38,20 @@ PIPELINES = {
 }
 
 SEGMENTATION_NODES = ("ImageDetectionPrompt_1", "ImageSegmentationBox_1")
+
+# What --from_sfm replaces with a converted COLMAP model.
+SFM_NODES = ("CameraInit_1", "FeatureExtraction_1", "ImageMatching_1", "FeatureMatching_1",
+             "StructureFromMotion_1")
+
+# Native-mode values for the flags of nodes --from_sfm skips; None means "not given".
+SFM_NODE_DEFAULTS = {
+    "describer_preset": "normal",
+    "describer_quality": "normal",
+    "describer_types": "dspsift",
+    "max_threads": 16,
+}
+
+RUN_GRAPH = Path(__file__).resolve().parent / "meshroom_run_graph.py"
 
 
 def run(cmd, cwd=None, env=None):
@@ -137,6 +154,45 @@ def write_turntable_graph(dest):
     return dest
 
 
+def write_dense_graph(dest, sfm_path):
+    """Write the photogrammetry template to dest with its SfM half removed.
+
+    PrepareDenseScene reads sfm_path directly; DepthMap onward is untouched. The
+    turntable template's dense nodes are linked identically, so it is not offered.
+    """
+    with open(find_template(PIPELINES["photogrammetry"])) as f:
+        template = json.load(f)
+    graph = template["graph"]
+    for name in SFM_NODES:
+        del graph[name]
+        template["header"]["nodesVersions"].pop(name.rsplit("_", 1)[0], None)
+
+    graph["PrepareDenseScene_1"]["inputs"]["input"] = str(sfm_path)
+
+    dangling = [n for n in SFM_NODES if f"{{{n}." in json.dumps(graph)]
+    if dangling:
+        raise RuntimeError(f"photogrammetry template still references {dangling}")
+
+    with open(dest, "w") as f:
+        json.dump(template, f, indent=4)
+    return dest
+
+
+def convert_sfm(scene_dir, output_dir, sparse):
+    """COLMAP scene -> <output_dir>/sfm/colmap.sfm, kept as the record of the cameras used."""
+    from colmap_to_sfmdata import ConversionError, convert
+
+    sfm_path = output_dir / "sfm" / "colmap.sfm"
+    t0 = time.time()
+    try:
+        stats = convert(scene_dir, sfm_path, sparse)
+    except ConversionError as e:
+        logger.error(f"Cannot use {scene_dir / sparse}: {e}")
+        sys.exit(1)
+    logger.info(f"Converted COLMAP model in {time.time() - t0:.1f}s")
+    return sfm_path, stats
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run the Meshroom batch photogrammetry pipeline.",
@@ -158,9 +214,17 @@ def main():
              "(photogrammetryObjectTurntable, which filters static-background matches)",
     )
 
-    parser.add_argument("--describer_preset", default="normal", help="FeatureExtraction.describerPreset")
-    parser.add_argument("--describer_quality", default="normal", help="FeatureExtraction.describerQuality")
-    parser.add_argument("--describer_types", default="dspsift", help="FeatureExtraction.describerTypes")
+    parser.add_argument(
+        "--from_sfm",
+        action="store_true",
+        help="input_dir is a COLMAP scene (images/, sparse/0/, optional masks/): convert its "
+             "model to SfMData and run only PrepareDenseScene onward",
+    )
+    parser.add_argument("--sparse", default="sparse/0", help="COLMAP model under input_dir (--from_sfm)")
+
+    parser.add_argument("--describer_preset", default=None, help="FeatureExtraction.describerPreset (default: normal)")
+    parser.add_argument("--describer_quality", default=None, help="FeatureExtraction.describerQuality (default: normal)")
+    parser.add_argument("--describer_types", default=None, help="FeatureExtraction.describerTypes (default: dspsift)")
     parser.add_argument("--depthmap_downscale", type=int, default=2, help="DepthMap.downscale")
     parser.add_argument("--max_input_points", type=int, default=50_000_000, help="Meshing.maxInputPoints")
     parser.add_argument("--max_points", type=int, default=5_000_000, help="Meshing.maxPoints")
@@ -185,7 +249,7 @@ def main():
     )
     parser.add_argument("--texture_side", type=int, default=8192, help="Texturing.textureSide")
     parser.add_argument("--texturing_downscale", type=int, default=2, help="Texturing.downscale")
-    parser.add_argument("--max_threads", type=int, default=16, help="FeatureExtraction:maxThreads")
+    parser.add_argument("--max_threads", type=int, default=None, help="FeatureExtraction:maxThreads (default: 16)")
     parser.add_argument(
         "--keep_cache",
         action="store_true",
@@ -199,6 +263,17 @@ def main():
     input_images = os.path.join(input_dir, "images")
     mask_images = os.path.join(input_dir, "masks")
 
+    if args.from_sfm:
+        if args.pipeline == "turntable":
+            parser.error("--pipeline turntable only changes the SfM half, which --from_sfm skips")
+        given = [f"--{k}" for k in SFM_NODE_DEFAULTS if getattr(args, k) is not None]
+        if given:
+            logger.warning(f"Ignoring {', '.join(given)}: --from_sfm skips the nodes they configure")
+    else:
+        for k, v in SFM_NODE_DEFAULTS.items():
+            if getattr(args, k) is None:
+                setattr(args, k, v)
+
     meshroom_root = args.meshroom_root or os.environ.get("MESHROOM_ROOT")
     if not meshroom_root:
         logger.error("MESHROOM_ROOT is not set. Pass --meshroom_root or export MESHROOM_ROOT.")
@@ -210,7 +285,10 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.pipeline == "turntable":
+    if args.from_sfm:
+        sfm_path, stats = convert_sfm(input_dir, output_dir, args.sparse)
+        pipeline = str(write_dense_graph(output_dir / "dense_template.mg", sfm_path))
+    elif args.pipeline == "turntable":
         pipeline = str(write_turntable_graph(output_dir / "turntable_template.mg"))
     else:
         pipeline = PIPELINES[args.pipeline]
@@ -219,15 +297,14 @@ def main():
     logger.info("Meshroom Baseline Pipeline")
     logger.info(f"  Input:    {input_images}")
     logger.info(f"  Mask dir: {mask_images} (will be ignored if not present)")
+    if args.from_sfm:
+        logger.info(f"  SfM:      {input_dir / args.sparse} -> {sfm_path} "
+                    f"({stats.views} views, {stats.landmarks} landmarks)")
     logger.info(f"  Output:   {output_dir}")
     logger.info(f"  Pipeline: {pipeline}")
     logger.info("=" * 60)
 
-    param_overrides = [
-        f"FeatureExtraction:maxThreads={args.max_threads}",
-        f"FeatureExtraction:describerPreset={args.describer_preset}",
-        f"FeatureExtraction:describerQuality={args.describer_quality}",
-        f"FeatureExtraction:describerTypes={args.describer_types}",
+    dense_overrides = [
         f"DepthMap:downscale={args.depthmap_downscale}",
         f"Meshing:maxInputPoints={args.max_input_points}",
         f"Meshing:maxPoints={args.max_points}",
@@ -239,30 +316,55 @@ def main():
         f"Texturing:downscale={args.texturing_downscale}",
         f"Texturing:colorMapping.colorMappingFileType=png",
     ]
-    if os.path.exists(mask_images):
-        param_overrides += [
-            f"FeatureExtraction:masksFolder={mask_images}",
-            f"PrepareDenseScene:masksFolders={[mask_images]!r}",
-        ]
-
-    cmd = [
-        sys.executable, str(meshroom_batch),
-        "-i", str(input_images),
-        "-o", str(output_dir),
-        "-p", pipeline,
-        "--paramOverrides", *param_overrides
-    ]
-    if args.save_file is not None:
-        cmd += ["-s", str(args.save_file.resolve())]
+    has_masks = os.path.exists(mask_images)
 
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(meshroom_root), env.get("PYTHONPATH", "")]))
+
+    if args.from_sfm:
+        # No EXIF reaches the converted views, so there is no exposure to correct.
+        param_overrides = dense_overrides + ["Texturing:correctEV=False"]
+        if has_masks:
+            param_overrides.append(f"PrepareDenseScene:masksFolders={[mask_images]!r}")
+        # The cache goes beside the project, so keep it in output_dir for prune_cache.
+        project = output_dir / "pipeline.mg"
+        cmd = [
+            sys.executable, str(RUN_GRAPH),
+            pipeline, str(output_dir), str(project),
+            "--paramOverrides", *param_overrides
+        ]
+    else:
+        param_overrides = [
+            f"FeatureExtraction:maxThreads={args.max_threads}",
+            f"FeatureExtraction:describerPreset={args.describer_preset}",
+            f"FeatureExtraction:describerQuality={args.describer_quality}",
+            f"FeatureExtraction:describerTypes={args.describer_types}",
+            *dense_overrides,
+        ]
+        if has_masks:
+            param_overrides += [
+                f"FeatureExtraction:masksFolder={mask_images}",
+                f"PrepareDenseScene:masksFolders={[mask_images]!r}",
+            ]
+
+        cmd = [
+            sys.executable, str(meshroom_batch),
+            "-i", str(input_images),
+            "-o", str(output_dir),
+            "-p", pipeline,
+            "--paramOverrides", *param_overrides
+        ]
+        if args.save_file is not None:
+            cmd += ["-s", str(args.save_file.resolve())]
 
     t0 = time.time()
     # run() exits non-zero on failure, so reaching the next line means success and
     # the cache is safe to prune.
     run(cmd, env=env)
     elapsed = time.time() - t0
+
+    if args.from_sfm and args.save_file is not None and args.save_file.resolve() != project:
+        shutil.copy2(project, args.save_file)
 
     if args.keep_cache:
         logger.info("Keeping MeshroomCache (--keep_cache)")
