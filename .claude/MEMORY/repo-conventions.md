@@ -25,7 +25,9 @@ constraints, verification steps and reasoning behind a change — what a diff do
 
 Landed: `augenblick-package-architecture.md` (the `src/augenblick` package and CLI),
 `move-backends-to-src-libs.md` (relocating third-party backends under `src/libs/`),
-`masking-stage.md` (the `mask` stage, input mixins on `Method`).
+`masking-stage.md` (the `mask` stage, input mixins on `Method`), `sam3-masking-method.md`
+(the `sam3` mask method and its vendoring), `geosvr-reconstruction-backend.md` (the `geosvr`
+backend and its local patches).
 
 ## Code comment and docstring style
 
@@ -49,9 +51,12 @@ pipeline/       Data preparation (preparation/); SfM and reconstruction moved to
 src/augenblick/ The pipeline package and its `augenblick` CLI
 baseline/       Meshroom wrapper
 scripts/        Per-GPU installers (auto_setup.sh + setup_{l40s,a100,a40,h100,b200,rtx_pro_6000,common}.sh)
+                + download_morphosource_project.py
 constraints/    numpy-generation pip pins (numpy1.txt, numpy2.txt), selected by NUMPY_GENERATION
-src/libs/       Backends: vggt/, sugar/, 2dgs/, pgsr/, gaussian_wrapping/, light_glue/, pytorch3d/
+src/libs/       Third-party code: vggt/, dvlt/, sugar/, 2dgs/, pgsr/, gaussian_wrapping/, geosvr/,
+                sam3/, light_glue/, pytorch3d/
 src/utils/      Standalone helpers (visual_util.py)
+docs/           Protocol write-ups (eval-protocol.md, scale-protocol.md)
 hpg_slurm/      HiPerGator job scripts (see cluster-slurm.md)
 pace_slurm/     PACE ICE job scripts, same jobs (see cluster-slurm.md)
 tests/          Package unit tests

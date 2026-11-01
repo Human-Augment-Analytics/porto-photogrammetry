@@ -1,6 +1,9 @@
 # Data Preparation and SfM Entry Points
 
-All SfM paths emit the same COLMAP scene layout — see [scene-format.md](scene-format.md).
+All SfM paths emit the same COLMAP scene layout — see [scene-format.md](scene-format.md). Every
+method takes `--scene <dir> --output <dir>`. Three build a model from images alone (`vggt`,
+`dvlt`, `colmap`); two are `SceneRefiner`s that need an existing `sparse/0/` (`turntable`,
+`hull`).
 
 ## Data preparation
 
@@ -16,15 +19,15 @@ Splits a flat directory of mixed images and masks (`<stem>.JPG` + `<stem>.jpg.ma
 
 ```bash
 augenblick sfm vggt \
-    --input_dir <dir>            \  # must contain images/
-    --output_dir <dir>           \
+    --scene <dir>                \  # must contain images/
+    --output <dir>               \
     [--use_masks] [--mask_erode_px 3] [--seed 42] \
-    [--conf_thres_value 2.0]     \  # VGGT depth-confidence floor, both modes
+    [--conf_perc_thresh 25.0]    \  # depth-confidence percentile floor, both modes
     [--use_ba]                   \  # VGGSfM tracker + pycolmap BA
     [--shared_camera] [--camera_type SIMPLE_PINHOLE] \
-    [--max_reproj_error 8.0] [--vis_thresh 0.2] \
-    [--min_inlier_per_frame 64] [--min_valid_frames 0.3] \  # BA inlier floors
-    [--query_frame_num 12] [--max_query_pts 4096] [--fine_tracking]
+    [--max_reproj_error 32.0] [--vis_thresh 0.2] \
+    [--min_inlier_per_frame 16] [--min_valid_frames 0.6] \  # BA inlier floors
+    [--query_frame_num 24] [--max_query_pts 4096] [--no-fine_tracking]
 ```
 
 Runs VGGT inference, writes `sparse/0/`, exports `points.ply`, and **symlinks** `images/` (plus
@@ -38,18 +41,19 @@ silhouette seam do not seed tracks that drift onto the turntable. A frame with n
 unconstrained, not empty. Loaders never composite masks into the image; RGBA inputs flatten onto
 black — 0 reads as "nothing here" downstream — masked or not.
 
-- **No BA (default):** VGGT depth + camera predictions directly; filter by `conf_thres_value`,
+- **No BA (default):** VGGT depth + camera predictions directly; filter by `conf_perc_thresh`,
   random-subsample to 100k points, write PINHOLE cameras at 518 px, then rescale to original
   resolution.
 - **With `--use_ba`:** VGGSfM tracker for correspondences, then `pycolmap.bundle_adjustment()`.
   Operates at 1024 px internally; supports SIMPLE_PINHOLE and shared-camera modes.
 
-`conf_thres_value` is one floor on one quantity — VGGT's `depth_conf` map — read in both modes:
-without BA it selects which depth pixels become 3D points; with BA the tracker samples the same
-map at each query point and drops the ones below it. Two traps: the BA-path filter is skipped
-entirely unless more than 512 query points clear it, so a low-confidence frame keeps all of them;
-and it replaced a hardcoded 1.2, so BA runs predating that were filtered more loosely and are not
-comparable to ones at the 2.0 default.
+`conf_perc_thresh` (default 25) is a percentile of VGGT's `depth_conf` map, taken over pixels with
+confidence > 0 (masking zeroes the background; VGGT's own confidence is > 1) and turned into one
+absolute floor per run, read in both modes: without BA it selects which depth pixels become 3D
+points; with BA the tracker samples the same map at each query point and drops the ones below it.
+Two traps: the BA-path filter is skipped entirely unless more than 512 query points clear it, so a
+low-confidence frame keeps all of them; and earlier runs used an absolute floor (hardcoded 1.2,
+then `conf_thres_value` 2.0), so they are not comparable to percentile-filtered ones.
 
 BA drops a frame with fewer than `min_inlier_per_frame` surviving tracks instead of aborting, and
 skips BA outright unless `min_valid_frames` — a *fraction* of the frame count, not a count — still
@@ -61,6 +65,34 @@ README's benchmarked BA invocation overrides the defaults:
 `--use_ba --shared_camera --max_reproj_error 32 --max_query_pts 1048576 --query_frame_num 8`.
 
 Model/geometry internals: [backend-vggt.md](backend-vggt.md).
+
+## DVLT → COLMAP (`augenblick sfm dvlt`)
+
+```bash
+augenblick sfm dvlt --scene <dir> --output <dir> \
+    [--use_masks] [--mask_pose_fit] [--inference_steps 12] [--img_size 504] \
+    [--conf_perc_thresh 25.0] [--max_points 100000] [--decode_chunk_size 32] \
+    [--checkpoint nvidia/dvlt] [--seed 42]
+```
+
+NVIDIA's Deja View looping transformer: the same contract as VGGT *without* BA. One forward
+pass gives camera-to-world poses, intrinsics and depth unprojected through those poses, written
+as a PINHOLE, per-image-camera model plus `sparse/0/points.ply`; `images/` (and `masks/`) are
+symlinked like VGGT.
+
+- `--inference_steps` is the recurrent loop count K, a model-constructor argument; outside the
+  evaluated 8–16 it warns and proceeds.
+- `--img_size` is the long edge fed to the network, then **centre-cropped** to multiples of 14
+  (not VGGT's square pad). `_to_original` maps cameras and 2D points back per image, so VGGT's
+  rescale helper does not apply.
+- `--conf_perc_thresh` is a percentile over *valid* pixels (finite, not padding and, with
+  `--use_masks`, masked-in), so masking does not shift the cutoff. Same semantics as VGGT's.
+- `--use_masks` only drops points; `--mask_pose_fit` (requires `--use_masks`) also weights the
+  pose fit by the masks, via a vendored local patch.
+- `--decode_chunk_size` exists because decoding all frames at once overflows CUDA 32-bit
+  indexing on ~276-frame scenes; chunking does not change the output.
+- Weights `nvidia/dvlt` come from the HF hub into `$HF_HOME`. Vendoring and licence:
+  [backend-dvlt.md](backend-dvlt.md).
 
 ## Masked COLMAP (`augenblick sfm colmap`)
 
@@ -87,7 +119,7 @@ re-solving poses on circular orbits.
 
 ```bash
 augenblick sfm turntable \
-    --input_dir <existing_colmap_scene> --output_dir <dir> \
+    --scene <existing_colmap_scene> --output <dir> \
     [--use_masks] [--camera_regex 'camera\d+'] [--step_deg <float>] \
     [--max_image_size 2400] [--retriangulate {auto,tracks,sift}] \
     [--max_reproj <px>] [--rig_ba {auto,on,off}] [--rig_ba_iters 3]
@@ -110,3 +142,35 @@ Flow:
    DLT triangulation.
 
 `--use_masks` auto-enables when `<input>/masks/` exists. `--rig_ba off` exists for ablations.
+
+## Visual-hull initialisation (`augenblick sfm hull`)
+
+```bash
+augenblick sfm hull --scene <existing_colmap_scene_with_masks> --output <dir> \
+    [--res 256] [--tau 0.92] [--min_seen_frac 0.5] [--mask_downscale 4] [--img_downscale 4] \
+    [--pad 0.08] [--bbox_percentile 0.5] [--n_points 300000] [--mask_pool decimate|max] \
+    [--soft_surface] [--component_frac 0.005] [--max_expansions 3] \
+    [--no-save_mesh] [--no-use_split] [--no-occlusion_aware] [--no-auto_bounds] \
+    [--no-refine_bounds] [--no-write_normals]
+```
+
+A `SceneRefiner` that also **requires `masks/`**. It space-carves the silhouettes through the
+input poses (a voxel survives when ≥ `tau` of the cameras that see it vote inside the mask),
+meshes the result, samples and colours `n_points` on it, and writes them, with normals, as
+`sparse/0/points3D.ply`. Poses, intrinsics, `points3D.bin` and `split.json` are copied through
+unchanged and the media symlinked, so output differs from input **only in the init cloud**: an
+initialisation ablation with everything else held fixed. `visual_hull.ply` is also written
+unless `--no-save_mesh`.
+
+- The grid is sized from the trimmed SfM cloud; `auto_bounds` grows and re-carves when the hull
+  touches the boundary, and `refine_bounds` re-carves on a grid tightened onto the hull.
+- With a `split.json` it carves and colours from **training views only** (`--no-use_split` to
+  override), so held-out views never leak into the init.
+- `mask_pool max` is the conservative outer bound but measurably inflates the hull; `decimate`
+  is the default for that reason.
+- **Which backends see the cloud:** 2DGS, SuGaR's 3DGS step and GW load
+  `sparse/0/points3D.ply` in preference to `points3D.bin` (GW was patched not to overwrite it);
+  PGSR reads `sparse/points3D.ply` from its flattened copy. **GeoSVR builds its points from
+  `points3D.bin`**, which the hull leaves unchanged, and uses them only for the scene bound, so a
+  hull scene trains GeoSVR exactly like its input SfM.
+

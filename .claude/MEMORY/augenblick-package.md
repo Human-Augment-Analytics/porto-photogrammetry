@@ -41,8 +41,10 @@ augenblick recon --list
 ```
 
 `sfm`/`recon` take `--scene`; `mask` takes `--images` (a flat images folder — it produces a
-scene rather than consuming one). Methods: mask `rembg`, `threshold`; SfM `vggt`, `colmap`,
-`turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`.
+scene rather than consuming one). Methods: mask `rembg`, `threshold`, `sam3`; SfM `vggt`,
+`dvlt`, `colmap`, `turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`, `milo`.
+Evaluation is deliberately **not** a stage here: `python -m augenblick.eval.{nvs,mesh,scale}`
+(see pipeline-evaluation.md).
 
 The per-stage input flag comes from one `STAGES` table in `cli/main.py`
 (`stage -> (registry, getter, help, input_flag, input_help)`); adding a stage is one entry
@@ -62,9 +64,11 @@ Exit codes, which SLURM guards depend on:
 
 ```
 core/     errors, Scene, config bridge, registry, process.run, StageTimer, Method ABC + mixins
-masking/  base (MaskMethod, MaskResult, write/postprocess helpers) + rembg, threshold
-sfm/      base (SfMMethod, SceneRefiner) + vggt, colmap, turntable, hull
-reconstruction/  base (ReconstructionMethod, SubprocessBackend, Stage) + the four backends
+masking/  base (MaskMethod, MaskResult, write/postprocess helpers) + rembg, threshold, sam3
+sfm/      base (SfMMethod, SceneRefiner, link_dir) + vggt, dvlt, colmap, turntable, hull
+reconstruction/  base (ReconstructionMethod, SubprocessBackend, Stage, EvalParams,
+          ResolutionParams) + the five backends
+eval/     split, metrics, nvs, mesh, scale — library + `python -m` mains, no registry
 cli/      main.py — the only place logging is configured
 ```
 
@@ -88,11 +92,11 @@ Stage ABCs:
   new masking technique is a single `mask_for()`. See pipeline-masking.md for the mask contract.
 - **`SfMMethod(SceneInputMixin, Method[Scene])`** requires only `images/`. **`SceneRefiner`**
   additionally requires a non-empty `sparse/0/` (calls `super().validate` then
-  `require_reconstruction()`) — encoding that `turntable` is a post-SfM refinement, not a
-  standalone SfM.
+  `require_reconstruction()`) — encoding that `turntable` and `hull` are post-SfM refinements,
+  not standalone SfM. `hull` further requires `masks/`.
 - **`ReconstructionMethod(SceneInputMixin, Method[Scene])`** requires both `images/` and
   `sparse/0/`, adds `stages()` and `mesh_path()`. **`SubprocessBackend`** implements `run()`
-  once for all four backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
+  once for all six backends: validate → `prepare()` → run each `Stage` under a `StageTimer`.
 
 ### Registry
 
@@ -140,8 +144,9 @@ each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
 
 ## Per-backend divergences (preserved deliberately)
 
-- **PGSR** overrides `prepare()`: it copies the scene and flattens `sparse/0/` → `sparse/`, and
-  **returns early if the prepared copy already exists**. Its render stage takes only `-m`, no
+- **PGSR** overrides `prepare()`: it builds `<output>/scene/` from symlinks, flattening
+  `sparse/0/` → `sparse/`, and **reuses an existing `<output>/scene/`** (re-copying
+  `split.json` only). Its render stage takes only `-m`, no
   `-s`, and `--skip_mesh` maps to upstream's `--skip_train`.
 - **GW** sets `use_cwd = False` — its scripts import from their own directory, so cwd would not
   help. It is the only backend with `accepts_passthrough = True`: unknown CLI flags are forwarded
@@ -152,6 +157,8 @@ each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
   path, not the output dir.
 - **2DGS** always passes `--skip_test` on render; `mesh_path()` is
   `train/ours_<iterations>/fuse_post.ply`.
+- **GeoSVR** loads a yacs preset via `--cfg_files`, then overrides it with flags; vendored patches make a flag always beat the preset and let `True` bools be turned off. Other vendored patches give it the same `-s`/`-m` script interface as the other backends. It reads the scene in place (no `prepare()`) and keeps every intermediate under the output dir. Its `validate()` also requires a mask per registered image while `lambda_mask > 0`, via `require_registered_masks` in `reconstruction/base.py`, shared with MILo. See [backend-geosvr.md](backend-geosvr.md).
+- **MILo** picks one of **two trainer scripts** from one field (`--densification`), and derives the iteration count and mesh config from it for both training and extraction, which must agree. It reads the scene in place (no `prepare()`); its `validate()` checks the `tetranerf` build, the rasteriser/mask-loss pairing and the masks. See [backend-milo.md](backend-milo.md).
 
 Passthrough is gated on `accepts_passthrough` rather than applied globally, so a typo in any other
 backend is rejected instead of silently forwarded.
@@ -223,9 +230,10 @@ Stage timings, useful as the baseline for spotting a future regression:
 `Scene` validation passes on real data; argv reaches the backends correctly; VGGT and 2DGS run to
 completion; `mesh_path()` matches where the backend actually wrote.
 
-**Not proven:** SuGaR, PGSR, and GW have never been run through the package. PGSR's `prepare()`
-scene-flattening and GW's no-`cwd` invocation plus passthrough are the two highest-risk
-unexercised paths. Non-default flags are likewise unexercised.
+Since then PGSR and GW have run through the package on all 76 dataset scenes
+(`colmap-{pgsr,gw}` under the HPG `RESULT_ROOT`, each with a mesh at `mesh_path()`), and GeoSVR
+was verified on `UF_Herp_87980_cranium` (backend-geosvr.md). **SuGaR has still never been run
+through the package.**
 
 ## Known follow-up work
 
