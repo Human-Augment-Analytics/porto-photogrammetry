@@ -52,12 +52,12 @@ augenblick recon geosvr --scene <scene_dir> --output <output_dir> \
     [--voxel_size 0.001] [--max_depth 5.0] [--sdf_trunc_scale 4.0] \
     [--num_cluster 1] [--use_depth_filter] [-r -1] [--eval]
 
-# MILo: Gaussians with a Delaunay mesh extracted inside training → SDF-refined mesh
+# MILo: Gaussians with a Delaunay mesh extracted inside training → TSDF mesh (or `--extract sdf`)
 augenblick recon milo --scene <scene_dir> --output <output_dir> \
     [--densification regular|fast] [--iterations] [--densify_until_iter] \
     [--regularization_from_iter] [--mesh_config <name|path.yaml>] [--rasterizer radegs|gof] \
     [--imp_metric indoor|outdoor] [--dense_gaussians] [--decoupled_appearance] \
-    [--lambda_mask 0.1] [--white_background] [--extract sdf|tsdf] [--refine_iter 1000] \
+    [--lambda_mask 0.1] [--white_background] [--extract tsdf|sdf] [--refine_iter 1000] \
     [--remove_oof_vertices] [--mesh_res 4096] [--num_cluster 50] [-r -1] [--eval]
 ```
 

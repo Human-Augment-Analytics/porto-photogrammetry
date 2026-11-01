@@ -6,7 +6,8 @@ Delaunay tetrahedralisation (`tetranerf`, rebuilt every 500 iterations), each pi
 learnable occupancy/SDF, and differentiable marching tetrahedra turns them into a mesh every
 iteration of the mesh phase. That mesh is rasterised with nvdiffrast and its depth/normals are
 pulled toward the Gaussians'. `mesh_extract_sdf.py` then refines the SDF with the Gaussians
-frozen and runs marching tetrahedra once more. No TSDF and no regular grid on the default path.
+frozen and runs marching tetrahedra once more. The wrapper's default extractor, though, is the
+regular-grid TSDF (`--extract tsdf`); the Delaunay mesh is `--extract sdf`.
 Same authors and code lineage as SuGaR and GW (GW's own `--milo` mode is a separate port).
 
 Wrapper: `augenblick recon milo` (`src/augenblick/reconstruction/milo.py`); flags in
@@ -45,9 +46,9 @@ with cwd = `milo/`: `train.py`'s `--config_path` default, `./configs/fast`, is c
 
 ## Extractors: `--extract sdf|tsdf`
 
-- `sdf` (default): `mesh_extract_sdf.py` → `<model>/mesh_learnable_sdf.ply`. Upstream never
+- `sdf`: `mesh_extract_sdf.py` → `<model>/mesh_learnable_sdf.ply`. Upstream never
   pairs it with the regular trainer (its DTU script uses a TSDF with absolute DTU-scale bounds).
-- `tsdf`: `mesh_extract_regular_tsdf.py` → `<model>/mesh_regular_tsdf_res<mesh_res>_post.ply`.
+- `tsdf` (default since `1bc0a16`): `mesh_extract_regular_tsdf.py` → `<model>/mesh_regular_tsdf_res<mesh_res>_post.ply`.
   Scale-free (`depth_trunc = 2 × min camera-to-centre distance`, `voxel = depth_trunc /
   mesh_res`) and zeroes depth outside `gt_mask`. Because the range spans the **camera
   distance**, not the specimen, upstream's `mesh_res 1024` left a turntable specimen ~150 voxels
@@ -97,7 +98,7 @@ no `cub::Max`. `SKIP_TETRA=1` removes MILo as well as GW pivot extraction; `vali
 
 | Run | Wall time | Peak RSS | Mesh | Background vertices |
 |---|---|---|---|---|
-| defaults (`regular`, sdf) | 4,952 s (train 4,378 incl. 67 min mesh loop; extract 574) | 56 GiB | 2.88 M faces | 0.01 % |
+| `regular`, `--extract sdf` | 4,952 s (train 4,378 incl. 67 min mesh loop; extract 574) | 56 GiB | 2.88 M faces | 0.01 % |
 | `--lambda_mask 0` | 3,953 s | 56 GiB | 2.50 M faces | **1.63 %** |
 
 Background = vertices on a zero mask pixel in ≥ half of 48 views that see them (PGSR 0 %,
