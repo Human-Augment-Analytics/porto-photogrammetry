@@ -20,6 +20,7 @@ LINKED_STAGES = [
     ("pgsr", "reconstructions", "{spec}/colmap-pgsr", False),
     ("gw", "reconstructions", "{spec}/colmap-gw", False),
     ("geosvr", "reconstructions", "{spec}/colmap-geosvr", False),
+    ("milo", "reconstructions", "{spec}/colmap-milo", False),
 ]
 
 

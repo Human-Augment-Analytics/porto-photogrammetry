@@ -27,6 +27,12 @@ MESH_PATHS.update(CONF.get("mesh_paths", {}))
 # Trainable backends must support held-out evaluation.
 BACKENDS = CONF.get("backends") or [CONF.get("backend", "2dgs")]
 TRAINS = bool(CONF.get("train"))
+UNKNOWN_BACKENDS = sorted(set(BACKENDS) - set(MESH_PATHS))
+if UNKNOWN_BACKENDS:
+    raise ValueError(
+        "No benchmark mesh path for: " + ", ".join(UNKNOWN_BACKENDS)
+        + ". Configure mesh_paths and ensure the backend exports cameras.json "
+          "for metric lineage validation.")
 
 _recipes = TREE / CONF.get("recipes", "recipes.json")
 RECIPES = json.loads(_recipes.read_text()) if _recipes.is_file() else {}
@@ -44,7 +50,7 @@ def model(specimen):
 
 
 def mesh_of(backend, specimen):
-    return TREE / backend / specimen / MESH_PATHS.get(backend, MESH_PATHS["2dgs"])
+    return TREE / backend / specimen / MESH_PATHS[backend]
 
 
 def has_model(specimen):

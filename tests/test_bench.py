@@ -278,3 +278,14 @@ def test_a_hand_written_split_is_checked_against_the_reconstruction():
                    {"train": stems}):
         with pytest.raises(SceneError):
             check_split(broken, stems)
+
+
+@pytest.mark.parametrize("backend", ["geosvr", "milo"])
+def test_links_adopts_available_optional_backends(tmp_path, backend):
+    from augenblick.bench import links
+
+    tree, source = linked_tree(tmp_path)
+    reconstruction = source / "spec_a" / f"colmap-{backend}"
+    reconstruction.mkdir()
+    assert links.run(tree, Args(check=False)) == 0
+    assert (tree.stage(backend) / "spec_a").resolve() == reconstruction

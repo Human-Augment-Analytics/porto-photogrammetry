@@ -14,7 +14,7 @@ CONFIG_FILENAME = "config.json"
 
 # Received data is read-only and kept apart from what the pipeline computes.
 INPUT_STAGES = ("images", "masks", "gt_artec", "realityscan")
-RECONSTRUCTION_STAGES = ("sfm", "2dgs", "pgsr", "gw", "geosvr")
+RECONSTRUCTION_STAGES = ("sfm", "2dgs", "pgsr", "gw", "geosvr", "milo")
 COMPUTED_STAGES = ("markers", "scales", "eval", "nvs", "splits")
 
 

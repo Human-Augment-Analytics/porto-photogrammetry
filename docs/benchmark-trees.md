@@ -35,6 +35,12 @@ The workflow reads `config.json` from the experiment directory.
 | `split` | `null` for all views, `holdout:n` for every nth view, or `manual` |
 | `mesh_paths` | Optional overrides for each backend's mesh output path |
 
+The workflow has default mesh paths for 2DGS, PGSR and GW. Other registered methods
+need an explicit `mesh_paths` entry and a compatible `cameras.json` export for metric
+lineage checks. In particular, the GeoSVR wrapper does not currently export that file;
+its CLI support alone does not make it ready for this metric benchmark. The convenience
+launcher accepts only the three backends with built-in paths.
+
 For a manual split, provide `splits_manual/<specimen>/split.json` with `train` and
 `test` lists of image stems. Validation rejects empty sets, overlapping views and
 names absent from the sparse reconstruction. Training uses the split only when
@@ -62,6 +68,8 @@ snakemake -s "$REPO/workflow/Snakefile" \
 Stages cover marker detection, scale estimation, split preparation, training, metric
 mesh export, geometry evaluation and novel-view evaluation. Geometry requires a
 reference mesh; novel-view evaluation requires a held-out split and a trained model.
+The shared novel-view scorer reports PSNR, SSIM, LPIPS and DISTS; install the evaluation
+dependencies in `requirements.txt`.
 See [scale-protocol.md](scale-protocol.md) for the scale-bar setup.
 
 For SLURM, add `--profile "$REPO/workflow/profiles/hipergator"` to the command.
