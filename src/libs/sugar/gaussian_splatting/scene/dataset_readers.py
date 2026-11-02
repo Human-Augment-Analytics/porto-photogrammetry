@@ -65,7 +65,7 @@ def getNerfppNorm(cam_info):
 
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, load_images=True):
     cam_infos = []
     loaded_masks = 0
     for idx, key in enumerate(cam_extrinsics):
@@ -97,11 +97,11 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
-        image = Image.open(image_path)
+        image = Image.open(image_path) if load_images else None
 
         masks_folder = os.path.join(os.path.dirname(images_folder), "masks")
         mask_path = os.path.join(masks_folder, image_name + ".png")
-        if os.path.exists(mask_path):
+        if load_images and os.path.exists(mask_path):
             mask = Image.open(mask_path).convert("L").resize(image.size)
             image.putalpha(mask)  # makes it RGBA
             loaded_masks += 1
@@ -138,7 +138,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+def readColmapSceneInfo(path, images, eval, llffhold=8, load_images=True, load_point_cloud=True):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -151,7 +151,9 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
     reading_dir = "images" if images == None else images
-    cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+    cam_infos_unsorted = readColmapCameras(
+        cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
+        images_folder=os.path.join(path, reading_dir), load_images=load_images)
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     # augenblick: an explicit split.json, written by augenblick.eval.split, overrides the
@@ -177,6 +179,10 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
+    if not load_point_cloud:
+        return SceneInfo(point_cloud=None, train_cameras=train_cam_infos,
+                         test_cameras=test_cam_infos, nerf_normalization=nerf_normalization,
+                         ply_path=ply_path)
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
     txt_path = os.path.join(path, "sparse/0/points3D.txt")
     if not os.path.exists(ply_path):
