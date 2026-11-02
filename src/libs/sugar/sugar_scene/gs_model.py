@@ -1,6 +1,7 @@
 import sys
 sys.path.append('./gaussian_splatting')
 import os
+import json
 import torch
 import plotly.graph_objs as go
 from gaussian_splatting.scene.gaussian_model import GaussianModel
@@ -84,6 +85,7 @@ class GaussianSplattingWrapper:
                  background=[0., 0., 0.],
                  white_background=False,
                  remove_camera_indices=[],
+                 resolution=-1,
                  ) -> None:
         """Initialize the Gaussian Splatting model wrapper.
         
@@ -104,6 +106,7 @@ class GaussianSplattingWrapper:
             white_background (bool, optional): If True, uses a white background instead of black. Defaults to False.
             remove_camera_indices (list, optional): List of indices of cameras to remove from the set of cameras. 
                 Defaults to [].
+            resolution (int, optional): Vanilla 3DGS downscale or target width; -1 caps width at 1600.
         """
         self.source_path = source_path
         self.output_path = output_path
@@ -115,6 +118,7 @@ class GaussianSplattingWrapper:
         
         if model_params is None:
             model_params = ModelParams()
+        model_params.resolution = resolution
         if pipeline_params is None:
             pipeline_params = PipelineParams()
         if opt_params is None:
@@ -135,16 +139,24 @@ class GaussianSplattingWrapper:
             load_gt_images=load_gt_images,
             white_background=white_background,
             remove_indices=remove_camera_indices,
+            resolution=resolution,
             )
         
         if eval_split:
-            self.cam_list = []
-            self.test_cam_list = []
-            for i, cam in enumerate(cam_list):
-                if i % eval_split_interval == 0:
-                    self.test_cam_list.append(cam)
-                else:
-                    self.cam_list.append(cam)
+            split_file = os.path.join(source_path, "split.json")
+            train_list, test_list = None, None
+            if os.path.exists(split_file):
+                with open(split_file) as handle:
+                    meta = json.load(handle)
+                    train_list, test_list = meta["train"], meta["test"]
+                    print(f"split.json: {len(train_list)} train, {len(test_list)} test")
+
+            if train_list is not None:
+                self.cam_list = [cam for cam in cam_list if cam.image_name in train_list]
+                self.test_cam_list = [cam for cam in cam_list if cam.image_name in test_list]
+            else:
+                self.cam_list = [cam for i, cam in enumerate(cam_list) if i % eval_split_interval != 0]
+                self.test_cam_list = [cam for i, cam in enumerate(cam_list) if i % eval_split_interval == 0]
             # test_ns_cameras = convert_camera_from_gs_to_nerfstudio(self.test_cam_list)
             # self.test_cameras = NeRFCameras.from_ns_cameras(test_ns_cameras)
             self.test_cameras = CamerasWrapper(self.test_cam_list)
