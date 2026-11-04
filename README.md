@@ -34,6 +34,11 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | PGSR | Planar-consistent Gaussians with multi-view geometric/photometric losses and TSDF meshing |
 | Gaussian Wrapping | Stochastic oriented Gaussians with pivot-based marching-tetrahedra extraction and texture refinement |
 | GeoSVR | Sparse-voxel octree (SVRaster) with a Depth-Anything-V2 depth prior, multi-view regularisers and TSDF meshing |
+| Neuralangelo (experimental) | Neural signed-distance field with coarse-to-fine hash encoding, mesh extraction and held-out neural rendering |
+
+Neuralangelo is opt-in and uses an external, unmodified NVIDIA checkout. See the
+[integration guide](.claude/MEMORY/backend-neuralangelo.md) for the pinned upstream
+revision, additional setup, GPU smoke test and checkpoint continuation commands.
 
 All combinations are benchmarked on runtime and compared qualitatively against RealityScan (commercial) and Meshroom (open-source) baselines.
 
