@@ -7,3 +7,6 @@
 [submodule "src/libs/gaussian_wrapping/submodules/Depth-Anything-V2"]
 	path = src/libs/gaussian_wrapping/submodules/Depth-Anything-V2
 	url = https://github.com/DepthAnything/Depth-Anything-V2.git
+[submodule "src/libs/neuralangelo"]
+	path = src/libs/neuralangelo
+	url = https://github.com/NVlabs/neuralangelo.git
