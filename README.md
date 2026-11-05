@@ -261,7 +261,7 @@ augenblick mask threshold --images /path/to/images/ --output /path/to/scene/ --m
 # SAM 3 concept prompting: a text prompt selects what to segment, so it can
 # exclude things a matting model cannot (e.g. scale bars next to a specimen).
 augenblick mask sam3 --images /path/to/images/ --output /path/to/scene/ \
-    --prompt "skeleton" --score_threshold 0.5
+    --prompt "skeleton" --score_threshold 0.3
 ```
 
 `sam3` is GPU-only and needs the **gated** `facebook/sam3` checkpoint — run `hf auth login`. All detections above `--score_threshold` are unioned into one mask.
@@ -269,7 +269,16 @@ augenblick mask sam3 --images /path/to/images/ --output /path/to/scene/ \
 Checkpoints are cached under `$HF_HOME`/`$TORCH_HOME`; on PACE, `pace_slurm/common.sh`
 points both at `$HOME/scratch/` so jobs do not fill the capped home directory.
 
-Shared flags: `--only_missing` (resume), `--min_foreground`/`--max_foreground` (reject bounds), `--keep_largest`, `--fill_holes`. A mask failing the bounds is not written, because every consumer reads a missing mask as "skip this view".
+Interior openings are preserved by default; `--fill_holes` fills them explicitly.
+SAM 3 downloads a pinned checkpoint revision; use `--checkpoint_revision` to select
+another revision or `--checkpoint_path` for local weights.
+The batch logs individual failures and continues; the CLI exits nonzero if any image fails.
+Inspect the masks before using them for reconstruction.
+
+`--only_missing` skips existing masks without checking their settings or contents.
+Use a separate output directory when changing settings.
+
+Shared flags: `--only_missing` (skip existing masks), `--min_foreground`/`--max_foreground` (reject bounds), `--keep_largest`, `--fill_holes`. A mask failing the bounds is not written, because every consumer reads a missing mask as "skip this view".
 
 ### Step 1: Structure-from-Motion
 
