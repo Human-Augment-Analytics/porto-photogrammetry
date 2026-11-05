@@ -7,29 +7,46 @@ exports held-out neural renders for the shared appearance evaluator.
 
 This is an experimental integration, validated on one skull specimen on PACE
 with an L40S and an A100. HPG and other GPU/software combinations have not been
-validated. The upstream source remains external and unmodified; no NVIDIA
-source, weights, datasets or compiled extensions are redistributed here.
+validated. The unmodified upstream source is a Git submodule at
+`src/libs/neuralangelo`, pinned to
+`94390b64683c067c620d9e075224ccfe582647d0`. Its original license and notices
+remain in the submodule. No weights, datasets or compiled extensions are bundled.
 
 ## Pinned Setup
 
-First install Augenblick and its normal dependencies. Registration and CLI help
+Registration and CLI help
 do not import Neuralangelo's optional packages. Training requires Linux, an
 NVIDIA GPU, a CUDA toolkit matching the selected PyTorch build, and the
 architecture-specific tiny-cuda-nn extension.
 
-From the Augenblick repository root:
+`git clone --recursive` initializes Neuralangelo alongside the other submodules.
+For an existing checkout, initialize it from the Augenblick repository root:
 
 ```bash
-git clone --recursive https://github.com/NVlabs/neuralangelo.git ../neuralangelo
-git -C ../neuralangelo checkout 94390b64683c067c620d9e075224ccfe582647d0
-git -C ../neuralangelo submodule update --init --recursive
-export NEURALANGELO_ROOT="$(realpath ../neuralangelo)"
+git submodule update --init --recursive src/libs/neuralangelo
+```
+
+Select Neuralangelo through the normal GPU-specific installer:
+
+```bash
+BACKENDS="neuralangelo" bash scripts/auto_setup.sh
+```
+
+The installer initializes the submodule, installs the normal environment and
+calls the Neuralangelo setup helper with that environment's Python. Include
+other backend names in `BACKENDS` to install them as well. Neuralangelo remains
+opt-in and is not added to the default backend build list.
+
+If Augenblick and its normal dependencies are already installed, run only the
+additional setup instead:
+
+```bash
 export PYTHON="$(command -v python)"
 export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 bash scripts/setup_neuralangelo.sh
 ```
 
-Run the setup script inside a GPU allocation. It adds pinned Python dependencies
+Run either setup route inside a GPU allocation. The helper adds pinned Python dependencies
 under constraints from the existing environment, builds tiny-cuda-nn at revision
 `3c7931caab7b691c6f30dffe20952ed727d935b9`, then checks a hash-grid CUDA
 forward/backward pass and upstream imports. It does not clone upstream, install
@@ -40,7 +57,9 @@ installs only the additional Python dependencies; it is not a GPU preflight.
 The tested base environment used Python 3.10, PyTorch 2.9.1+cu129,
 torchvision 0.24.1+cu129, NumPy 2.2.6 and CUDA toolkit 12.9.1. The setup helper
 uses the `PYTHON` interpreter (default `python`) and `NEURALANGELO_ROOT`
-(default sibling `../neuralangelo`). Build for each GPU architecture before
+(default `src/libs/neuralangelo`). The backend uses that submodule by default;
+`--upstream /absolute/path` selects an alternative checkout for reconstruction.
+Set `NEURALANGELO_ROOT` to the same alternative path for setup. Build for each GPU architecture before
 using that GPU; the L40S extension alone does not support an A100.
 
 ## GPU Smoke Test and Reconstruction
@@ -48,11 +67,13 @@ using that GPU; the L40S extension alone does not support an A100.
 Set `SCENE` to an existing SfM scene and choose fresh absolute output paths:
 
 ```bash
+export PYTHON="$(command -v python)"
+export NEURALANGELO_ROOT="$(realpath src/libs/neuralangelo)"
 SCENE="$(realpath /path/to/scene)"
 SMOKE="$PWD/output/neuralangelo-smoke"
 OUTPUT="$PWD/output/neuralangelo-full"
 "$PYTHON" -m augenblick.cli.main recon neuralangelo \
-  --scene "$SCENE" --output "$SMOKE" --upstream "$NEURALANGELO_ROOT" \
+  --scene "$SCENE" --output "$SMOKE" \
   --eval --iterations 30 --resolution 320 --rays 64 --batch_size 1 \
   --mesh_resolution 64 --block_resolution 32
 ```
@@ -67,7 +88,7 @@ For the full default recipe:
 
 ```bash
 "$PYTHON" -m augenblick.cli.main recon neuralangelo \
-  --scene "$SCENE" --output "$OUTPUT" --upstream "$NEURALANGELO_ROOT" \
+  --scene "$SCENE" --output "$OUTPUT" \
   --eval --iterations 500000 --resolution 1600 --rays 512 --batch_size 2 \
   --mesh_resolution 1024 --block_resolution 64
 ```
@@ -161,7 +182,7 @@ continuation; do not lower `max_iter` to evaluate an earlier checkpoint.
 ## License and Limits
 
 Read NVIDIA's upstream `LICENSE.md` before use. It restricts Neuralangelo to
-non-commercial research/evaluation on NVIDIA processors. Keep the upstream
-checkout separate and do not assume Augenblick's license overrides it.
+non-commercial research/evaluation on NVIDIA processors. The submodule retains
+that license and its notices; Augenblick's license does not override them.
 Multi-specimen quality validation, UV photo-baking and HPG deployment remain
 follow-up work rather than claims of this integration.

@@ -12,6 +12,7 @@ from PIL import Image
 from augenblick.core.errors import SceneError
 from augenblick.core.registry import RECONSTRUCTION_REGISTRY
 from augenblick.core.scene import Scene
+from augenblick.reconstruction.base import LIBS_DIR
 from augenblick.reconstruction.neuralangelo import NeuralangeloBackend, NeuralangeloConfig
 from augenblick.reconstruction.neuralangelo_runner import camera_matrix, checkpoint, disabled_logging, image_size, normalization, partition_names
 from augenblick.reconstruction.neuralangelo_runner import apply_training_schedule, training_schedule
@@ -104,6 +105,21 @@ def test_prepare_without_evaluation_uses_all_registered_views(prepared_scene_arg
     metadata = json.loads((args.output / "scene/transforms.json").read_text())
     assert len(metadata["frames"]) == 6
     assert metadata["val_frames"] == []
+
+
+def test_backend_defaults_to_libs_submodule():
+    config = NeuralangeloConfig()
+    assert config.upstream == LIBS_DIR / "neuralangelo"
+    stages = NeuralangeloBackend(config).stages(Scene(Path("/scene")), Path("/out"))
+    for stage in stages:
+        assert stage.cmd[stage.cmd.index("--upstream") + 1] == str(config.upstream)
+
+
+def test_backend_preserves_upstream_override(tmp_path):
+    config = NeuralangeloConfig(upstream=tmp_path / "custom-neuralangelo")
+    stages = NeuralangeloBackend(config).stages(Scene(Path("/scene")), Path("/out"))
+    for stage in stages:
+        assert stage.cmd[stage.cmd.index("--upstream") + 1] == str(config.upstream)
 
 
 def test_backend_registration_and_stage_contract():

@@ -36,9 +36,10 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | GeoSVR | Sparse-voxel octree (SVRaster) with a Depth-Anything-V2 depth prior, multi-view regularisers and TSDF meshing |
 | Neuralangelo (experimental) | Neural signed-distance field with coarse-to-fine hash encoding, mesh extraction and held-out neural rendering |
 
-Neuralangelo is opt-in and uses an external, unmodified NVIDIA checkout. See the
-[integration guide](.claude/MEMORY/backend-neuralangelo.md) for the pinned upstream
-revision, additional setup, GPU smoke test and checkpoint continuation commands.
+Neuralangelo is opt-in and pinned as an unmodified Git submodule at
+`src/libs/neuralangelo`, initialized by `git clone --recursive`. See the
+[integration guide](.claude/MEMORY/backend-neuralangelo.md) for additional setup,
+GPU smoke testing, checkpoint continuation and NVIDIA license restrictions.
 
 All combinations are benchmarked on runtime and compared qualitatively against RealityScan (commercial) and Meshroom (open-source) baselines.
 
@@ -88,6 +89,13 @@ pip install -e . --no-deps --no-build-isolation
 
 Use `BACKENDS="2dgs pgsr"` to install a subset of backends (default: `sugar 2dgs pgsr gw geosvr`), or `SKIP_TETRA=1` to skip the
 Gaussian Wrapping CGAL build.
+
+Select Neuralangelo with `BACKENDS="neuralangelo" bash scripts/auto_setup.sh`
+(or a specific GPU wrapper). This initializes its submodule and runs its
+dependency/CUDA setup; it does not add Neuralangelo to the default build list.
+For an already configured environment, initialize it with
+`git submodule update --init --recursive src/libs/neuralangelo` and run
+`bash scripts/setup_neuralangelo.sh`. No separate repository clone is needed.
 
 numpy and the packages built against its C-ABI (`scipy`, `scikit-learn`, `scikit-image`) are
 pinned in `constraints/numpy{1,2}.txt` rather than `requirements.txt`, because the required
@@ -160,7 +168,7 @@ augenblick/
 │   │   ├── core/              #   Scene, config↔argparse bridge, registry, process, timing
 │   │   ├── masking/           #   rembg, threshold, sam3
 │   │   ├── sfm/               #   vggt, dvlt, colmap, turntable, hull
-│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw, geosvr
+│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw, geosvr, neuralangelo
 │   │   ├── eval/              #   Held-out split, masked NVS metrics, mesh scoring, metric scale
 │   │   └── cli/               #   Argument parsing and exit codes
 │   ├── libs/                  # Third-party backends (vendored + submodules)
@@ -197,6 +205,7 @@ augenblick/
 │   │   │   └── mesh_extract/       # TSDF meshing scripts
 │   │   ├── dvlt/              # DVLT (NVIDIA Deja View)
 │   │   ├── sam3/              # SAM 3 (vendored, trimmed to the image-masking path)
+│   │   ├── neuralangelo/     # NVIDIA Neuralangelo (pinned submodule)
 │   │   ├── light_glue/        # LightGlue (submodule)
 │   │   └── pytorch3d/         # PyTorch3D (submodule)
 │   └── utils/

@@ -2,8 +2,12 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PYTHON:-python}"
-UPSTREAM="${NEURALANGELO_ROOT:-$REPO/../neuralangelo}"
-[[ -f "$UPSTREAM/train.py" ]]
+UPSTREAM="${NEURALANGELO_ROOT:-$REPO/src/libs/neuralangelo}"
+if [[ ! -f "$UPSTREAM/train.py" ]]; then
+    echo "Neuralangelo source not found: $UPSTREAM" >&2
+    echo "Run git submodule update --init --recursive src/libs/neuralangelo or set NEURALANGELO_ROOT." >&2
+    exit 1
+fi
 if [[ "${1:-}" != --python-only ]]; then
     "$PYTHON" -c 'import torch; assert torch.cuda.is_available(), "Run setup in a GPU allocation"; print(torch.__version__, torch.cuda.get_device_name())'
     command -v nvcc

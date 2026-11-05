@@ -7,12 +7,12 @@ from typing import ClassVar
 from augenblick.core.registry import register_reconstruction
 from augenblick.core.errors import SceneError
 from augenblick.core.scene import Scene
-from augenblick.reconstruction.base import REPO_ROOT, EvalParams, Stage, SubprocessBackend
+from augenblick.reconstruction.base import LIBS_DIR, REPO_ROOT, EvalParams, Stage, SubprocessBackend
 
 
 @dataclass(frozen=True)
 class NeuralangeloConfig(EvalParams):
-    upstream: Path = field(default=REPO_ROOT.parent / "neuralangelo")
+    upstream: Path = field(default=LIBS_DIR / "neuralangelo")
     iterations: int = 500_000
     resolution: int = field(default=1600, metadata={"help": "Maximum image dimension"})
     rays: int = 512
@@ -34,7 +34,10 @@ class NeuralangeloBackend(SubprocessBackend):
     def validate(self, scene: Scene) -> None:
         super().validate(scene)
         if not (self.config.upstream / "train.py").is_file():
-            raise SceneError(f"Neuralangelo source not found: {self.config.upstream}")
+            raise SceneError(
+                f"Neuralangelo source not found: {self.config.upstream}. "
+                "Run git submodule update --init --recursive src/libs/neuralangelo "
+                "or specify --upstream.")
         if self.config.mesh_resolution < 2 or self.config.block_resolution < 2:
             raise SceneError("Extraction resolutions must be at least two")
         if self.config.reference_mesh and not Path(self.config.reference_mesh).is_file():
