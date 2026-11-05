@@ -1,4 +1,4 @@
-"""Generate a redistributable three-camera input for `augenblick color`."""
+"""Generate a redistributable three-camera input for `augenblick prepare color`."""
 
 from __future__ import annotations
 

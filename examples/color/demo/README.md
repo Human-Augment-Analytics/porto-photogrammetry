@@ -1,6 +1,6 @@
 # Colour calibration demo
 
-This self-contained demo exercises `augenblick color` without private museum data. It creates
+This self-contained demo exercises `augenblick prepare color` without private museum data. It creates
 three synthetic camera groups with known colour casts, one automatically detected 24-patch
 reference image per camera, one capture per camera, and unchanged binary masks.
 
@@ -11,7 +11,7 @@ From the repository root, in an environment containing NumPy, OpenCV, and Pillow
 ```bash
 python examples/color/demo/generate_demo.py
 
-augenblick color \
+augenblick prepare color \
   --input examples/color/demo/generated/input \
   --output examples/color/demo/generated/output \
   --config examples/color/demo/generated/config.json
