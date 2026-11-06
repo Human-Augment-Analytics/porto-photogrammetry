@@ -38,6 +38,7 @@ or git history already records stay out. A fact about *the repo* goes in `MEMORY
 | [backend-pgsr.md](MEMORY/backend-pgsr.md) | PGSR planar Gaussians, multi-view losses, TSDF meshing |
 | [backend-gaussian-wrapping.md](MEMORY/backend-gaussian-wrapping.md) | GW three stages, components, CUDA submodule matrix |
 | [backend-geosvr.md](MEMORY/backend-geosvr.md) | GeoSVR sparse voxels, yacs CLI fixes, outputs, vendoring + local patches |
+| [backend-neus2.md](MEMORY/backend-neus2.md) | NeuS2 method, pinned libs submodule, headless CUDA build, masked static scene adapter and held-out evaluation |
 | [backend-milo.md](MEMORY/backend-milo.md) | MILo mesh-in-the-loop: two recipes, extractors, shared GW/SuGaR builds, RaDe-GS rename, local patches |
 | [baseline-meshroom.md](MEMORY/baseline-meshroom.md) | Meshroom wrapper + reference runtimes |
 | [repo-conventions.md](MEMORY/repo-conventions.md) | Doc rule, repo layout, legacy code, ID/naming and commit conventions |

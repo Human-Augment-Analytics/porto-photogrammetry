@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.18)
+project(augenblick-neus2 VERSION 1.0 LANGUAGES C CXX)
+
+if(NOT EXISTS "${NEUS2_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "NEUS2_SOURCE_DIR must point to the initialized NeuS2 submodule")
+endif()
+if(NOT EXISTS "${NEUS2_PYBIND11_INCLUDE}/pybind11/numpy.h")
+    message(FATAL_ERROR "NEUS2_PYBIND11_INCLUDE must point to the build-only pybind11 headers")
+endif()
+
+add_subdirectory("${NEUS2_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/upstream")
+if(NOT TARGET pyngp)
+    message(FATAL_ERROR "NeuS2 did not enable Python bindings; check Python development headers")
+endif()
+target_include_directories(pybind11_headers BEFORE INTERFACE "${NEUS2_PYBIND11_INCLUDE}")
+target_include_directories(pyngp BEFORE PRIVATE "${NEUS2_PYBIND11_INCLUDE}")
+foreach(neus2_target ngp pyngp)
+    if(TARGET ${neus2_target})
+        target_compile_options(${neus2_target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CUDA>:--pre-include=${CMAKE_CURRENT_SOURCE_DIR}/compat.cuh>")
+    endif()
+endforeach()
+set_target_properties(pyngp PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
