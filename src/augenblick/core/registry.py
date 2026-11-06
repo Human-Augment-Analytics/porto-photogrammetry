@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 SFM_REGISTRY: dict[str, type] = {}
 RECONSTRUCTION_REGISTRY: dict[str, type] = {}
 MASK_REGISTRY: dict[str, type] = {}
+PREPARATION_REGISTRY: dict[str, type] = {}
 
 
 def _register(registry: dict[str, type], cls: type, kind: str) -> type:
@@ -51,6 +52,11 @@ def register_mask(cls: type) -> type:
     return _register(MASK_REGISTRY, cls, "mask")
 
 
+def register_preparation(cls: type) -> type:
+    """Register a preparation method class under its `name` attribute."""
+    return _register(PREPARATION_REGISTRY, cls, "preparation")
+
+
 def get_sfm(name: str) -> type:
     """Return the registered SfM method class, or raise MethodNotFound."""
     return get_method(SFM_REGISTRY, name, "SfM")
@@ -64,3 +70,8 @@ def get_reconstruction(name: str) -> type:
 def get_mask(name: str) -> type:
     """Return the registered mask method class, or raise MethodNotFound."""
     return get_method(MASK_REGISTRY, name, "mask")
+
+
+def get_preparation(name: str) -> type:
+    """Return the registered preparation method class, or raise MethodNotFound."""
+    return get_method(PREPARATION_REGISTRY, name, "preparation")

@@ -1,0 +1,46 @@
+{
+  "chart_model": "X-Rite ColorChecker Classic Nano",
+  "target_preset": "xrite_colorchecker_classic_after_nov2014",
+  "target_rotation_degrees": 180,
+  "source": "Archived 600 x 400 rectified chart crops from the UF_Herp_3998 pilot",
+  "source_limit": "This validates the absolute target and chart orientation on real chart pixels. The original full-resolution image tree is not available in the current workspace, so this artifact does not replace a full batch rerun.",
+  "orientation_check": {
+    "standard_orientation_mean_delta_e76_after_across_cameras": 38.735206604003906,
+    "rotated_180_mean_delta_e76_after_across_cameras": 5.10699462890625
+  },
+  "cameras": {
+    "camera1": {
+      "mean_delta_e76_before": 11.908523559570312,
+      "median_delta_e76_before": 11.31716537475586,
+      "mean_delta_e76_after": 5.006280899047852,
+      "median_delta_e76_after": 4.516511917114258,
+      "matrix": [
+        [1.3914271593093872, 0.08679572492837906, 0.0882287248969078],
+        [0.045493338257074356, 1.2592670917510986, -0.11334843188524246],
+        [-0.12018781900405884, 0.09544240683317184, 1.2179402112960815]
+      ]
+    },
+    "camera2": {
+      "mean_delta_e76_before": 18.144838333129883,
+      "median_delta_e76_before": 16.843181610107422,
+      "mean_delta_e76_after": 5.387564182281494,
+      "median_delta_e76_after": 4.761277198791504,
+      "matrix": [
+        [1.9357120990753174, 0.07620657235383987, 0.08175347000360489],
+        [-0.0584978386759758, 1.7870489358901978, -0.2105400711297989],
+        [-0.20132160186767578, -0.0058477637358009815, 1.6089726686477661]
+      ]
+    },
+    "camera3": {
+      "mean_delta_e76_before": 8.660133361816406,
+      "median_delta_e76_before": 7.523381233215332,
+      "mean_delta_e76_after": 4.927138805389404,
+      "median_delta_e76_after": 3.9625744819641113,
+      "matrix": [
+        [1.2917917966842651, 0.0766754150390625, 0.0790996104478836],
+        [0.045461155474185944, 1.1574684381484985, -0.08198194950819016],
+        [-0.11825764924287796, 0.0721433162689209, 1.16511070728302]
+      ]
+    }
+  }
+}
