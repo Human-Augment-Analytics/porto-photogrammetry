@@ -34,6 +34,11 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | PGSR | Planar-consistent Gaussians with multi-view geometric/photometric losses and TSDF meshing |
 | Gaussian Wrapping | Stochastic oriented Gaussians with pivot-based marching-tetrahedra extraction and texture refinement |
 | GeoSVR | Sparse-voxel octree (SVRaster) with a Depth-Anything-V2 depth prior, multi-view regularisers and TSDF meshing |
+| NeuS2 (experimental) | CUDA hash-encoded neural SDF for masked static scenes, zero-level meshing and held-out neural rendering |
+
+NeuS2 is pinned as the `src/libs/neus2` Git submodule. See the
+[integration and method guide](.claude/MEMORY/backend-neus2.md) for native build
+requirements, camera/mask conventions, smoke testing and license restrictions.
 
 All combinations are benchmarked on runtime and compared qualitatively against RealityScan (commercial) and Meshroom (open-source) baselines.
 
@@ -83,6 +88,11 @@ pip install -e . --no-deps --no-build-isolation
 
 Use `BACKENDS="2dgs pgsr"` to install a subset of backends (default: `sugar 2dgs pgsr gw geosvr`), or `SKIP_TETRA=1` to skip the
 Gaussian Wrapping CGAL build.
+
+NeuS2 is opt-in: select `BACKENDS="neus2" bash scripts/auto_setup.sh` on a GPU
+node. For an existing environment, run
+`git submodule update --init --recursive src/libs/neus2` followed by
+`bash scripts/setup_neus2.sh`. No separate repository clone is needed.
 
 numpy and the packages built against its C-ABI (`scipy`, `scikit-learn`, `scikit-image`) are
 pinned in `constraints/numpy{1,2}.txt` rather than `requirements.txt`, because the required
