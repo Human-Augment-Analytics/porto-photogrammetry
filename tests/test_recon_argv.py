@@ -512,16 +512,15 @@ def test_milo_argv():
         "-r", "-1",
     ]
     assert extract == [
-        sys.executable, str(MILO_SDF_SCRIPT), "-m", "/out",
-        "--iteration", "30000", "--rasterizer", "radegs", "--config", "default_dtu",
-        "--imp_metric", "indoor", "--refine_iter", "1000",
+        sys.executable, str(MILO_TSDF_SCRIPT), "-m", "/out",
+        "--rasterizer", "radegs", "--mesh_res", "4096", "--num_cluster", "50",
     ]
-    assert backend.mesh_path(OUT) == OUT / "mesh_learnable_sdf.ply"
+    assert backend.mesh_path(OUT) == OUT / "mesh_regular_tsdf_res4096_post.ply"
     assert backend.backend_dir == MILO and backend.use_cwd
 
 
 def test_milo_fast_recipe_defaults():
-    train, extract = (s.cmd for s in MiloBackend(MiloConfig(densification="fast")).stages(SCENE, OUT))
+    train, extract = (s.cmd for s in MiloBackend(MiloConfig(densification="fast", extract="sdf")).stages(SCENE, OUT))
     assert train[1] == str(MILO_TRAIN_FAST_SCRIPT)
     assert train[train.index("--iterations") + 1] == "18000"
     assert train[train.index("--mesh_config") + 1] == "default"
@@ -531,7 +530,7 @@ def test_milo_fast_recipe_defaults():
 
 
 def test_milo_overrides_reach_train_and_extract():
-    cfg = MiloConfig(iterations=5000, densify_until_iter=3000, regularization_from_iter=2000,
+    cfg = MiloConfig(extract="sdf", iterations=5000, densify_until_iter=3000, regularization_from_iter=2000,
                      eval=True, white_background=True, dense_gaussians=True,
                      decoupled_appearance=True, remove_oof_vertices=True, resolution=2)
     train, _, extract = (s.cmd for s in MiloBackend(cfg).stages(SCENE, OUT))
@@ -546,7 +545,7 @@ def test_milo_mesh_config_path_reaches_both_stages(tmp_path, milo_tetra):
     scene = _geosvr_scene(tmp_path / "scene")
     yaml = tmp_path / "smoke.yaml"
     yaml.write_text("start_iter: 3501\n")
-    train, extract = (s.cmd for s in MiloBackend(MiloConfig(mesh_config=str(yaml))).stages(scene, OUT))
+    train, extract = (s.cmd for s in MiloBackend(MiloConfig(mesh_config=str(yaml), extract="sdf")).stages(scene, OUT))
     assert train[train.index("--mesh_config") + 1] == str(yaml)
     assert extract[extract.index("--config") + 1] == str(yaml)
     with pytest.raises(ValueError, match="does not exist"):

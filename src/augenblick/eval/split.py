@@ -1,4 +1,4 @@
-"""The held-out view split, written once so every backend evaluates the same images."""
+"""Build and validate shared training and test view splits."""
 import json
 import logging
 import shutil
@@ -47,21 +47,7 @@ def read_split(scene_root: Path) -> dict[str, list[str]] | None:
 
 
 def write_split(scene_root: Path, holdout: int = DEFAULT_HOLDOUT) -> dict[str, list[str]]:
-    """Derive the held-out split from the scene's COLMAP model and persist it.
-
-    An existing split.json is reused rather than regenerated, so a hand-authored split
-    survives and every backend pointed at the scene trains on the same images.
-
-    Args:
-        scene_root: Scene directory holding images/ and the COLMAP model.
-        holdout: Hold out one view in every `holdout`, matching the backends' llffhold.
-
-    Returns:
-        The split, as {"train": [stem, ...], "test": [stem, ...]}.
-
-    Raises:
-        SceneError: If the scene carries no COLMAP model to derive a split from.
-    """
+    """Reuse an existing split.json or derive and save one from the COLMAP model."""
     existing = read_split(scene_root)
     if existing is not None:
         logger.info(f"Reusing {scene_root / SPLIT_FILENAME}: "
@@ -92,3 +78,83 @@ def copy_split(src_root: Path, dest_root: Path) -> Path | None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, dest)
     return dest
+
+
+MANUAL = "manual"
+
+
+def parse_rule(rule) -> tuple[str, int | None]:
+    """Read a split rule into its kind and its parameter."""
+    if rule == MANUAL:
+        return MANUAL, None
+    if isinstance(rule, str) and ":" in rule:
+        kind, value = rule.split(":", 1)
+    else:
+        raise SceneError(f"unreadable split rule: {rule!r}")
+    if kind != "holdout":
+        raise SceneError(f"unknown split rule {kind!r}; expected holdout:n or {MANUAL}")
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise SceneError(f"holdout needs an integer, got {value!r}")
+    if value < 2:
+        raise SceneError("holdout:n needs n of at least two, or nothing is trained on")
+    return kind, value
+
+
+def check_split(split: dict, stems) -> dict:
+    """Reject empty, overlapping or unknown view sets."""
+    for side in ("train", "test"):
+        if not isinstance(split.get(side), list) or not split[side]:
+            raise SceneError(f"split has no {side} views")
+    train, test = set(split["train"]), set(split["test"])
+    overlap = train & test
+    if overlap:
+        raise SceneError("views in both train and test: "
+                         + ", ".join(sorted(overlap)[:4]))
+    unknown = (train | test) - set(stems)
+    if unknown:
+        raise SceneError("split names views the reconstruction does not hold: "
+                         + ", ".join(sorted(unknown)[:4]))
+    return split
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Write a scene's split, derived from a rule or adopted from a hand-written file."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="augenblick.eval.split",
+                                     description=main.__doc__)
+    parser.add_argument("--model", type=Path, required=True,
+                        help="the COLMAP model whose registered views are split")
+    parser.add_argument("--rule", required=True,
+                        help=f"holdout:n, or {MANUAL} to adopt --manual")
+    parser.add_argument("--manual", type=Path,
+                        help=f"a hand-written split, required when --rule is {MANUAL}")
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+
+    kind, value = parse_rule(args.rule)
+    stems = registered_stems(args.model)
+    if kind == MANUAL:
+        if not args.manual or not args.manual.is_file():
+            raise SceneError(f"--rule {MANUAL} needs a split at {args.manual}")
+        split = json.loads(args.manual.read_text())
+        split.setdefault("rule", MANUAL)
+        split["source"] = str(args.manual)
+    else:
+        split = {"rule": f"{kind}:{value}", **build_split(stems, value)}
+    check_split(split, stems)
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(split, indent=2, sort_keys=True) + "\n")
+    logger.info(f"{len(split['train'])} train, {len(split['test'])} test "
+                f"({split['rule']}) -> {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
