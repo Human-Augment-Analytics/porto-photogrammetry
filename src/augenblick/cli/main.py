@@ -116,7 +116,11 @@ def main(argv: list[str] | None = None) -> int:
     method = cls.from_namespace(args, extras) if cls.accepts_passthrough else cls.from_namespace(args)
 
     try:
-        method.run(cls.build_input(args.input_dir.resolve()), args.output.resolve())
+        result = method.run(cls.build_input(args.input_dir.resolve()), args.output.resolve())
+        if args.stage == "mask" and getattr(result, "num_failed", 0):
+            logger.error(f"mask generation incomplete: {result.num_failed} failed; "
+                         "see per-image warnings above")
+            return 2
     except SceneError as exc:
         logger.error(str(exc))
         return 2

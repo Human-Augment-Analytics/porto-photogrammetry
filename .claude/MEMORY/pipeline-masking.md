@@ -42,8 +42,9 @@ disable masking while looking successful).
 - **`sam3`**: concept-prompted instance segmentation (SAM 3, Meta), GPU-only. A **text prompt**
   selects what to segment, discriminating where a matting model cannot — `skeleton` isolates a
   specimen and leaves scale bars out. Key flags: `--prompt` (default `skeleton`),
-  `--score_threshold` (0.5), `--max_detections` (0 = all above threshold), `--checkpoint_path`,
-  `--device`.
+  `--score_threshold` (0.3), `--max_detections` (0 = all above threshold), `--checkpoint_path`,
+  `--device`. The checkpoint revision is pinned; `--checkpoint_revision` selects another
+  revision, and `--checkpoint_path` selects local weights.
 
   Detections surviving the threshold are **unioned**, not argmaxed: a specimen routinely returns
   as several instances (cranium, mandible), and taking only the top score would drop the rest.
@@ -76,16 +77,18 @@ Shared flags (all methods): `--only_missing` (underscore, not `--only-missing`; 
 that already have a mask), `--min_foreground`/`--max_foreground` (reject bounds),
 `--keep_largest`, `--fill_holes`, `--batch_log_every` (progress line from `MaskMethod.run`).
 
-`--only_missing` reuses what is on disk **without checking how it was produced**, so masks
-written during a silent CPU fallback survive every rerun and look like a cache hit. After
-fixing a fallback, delete `<output>/masks/` or drop the flag — a rerun alone will not redo them.
+Holes are preserved by default; `--fill_holes` fills interior openings explicitly.
+`--only_missing` skips existing masks without validating their settings or contents.
+Use a separate output directory when changing settings, or omit the flag to regenerate.
+Individual failures are logged and processing continues; the CLI exits nonzero if any
+image fails. Image stems must be unique, and generation refuses a symlinked `masks/`.
 
-## Cost is postprocessing, not inference
+## Postprocessing cost
 
 `rembg` infers at 1024² but returns a mask at **source resolution**, which `run()` passes
 straight to `postprocess_mask` — so `keep_largest`/`fill_holes` do morphology on 26 MP, not
-1 MP. On 6240×4160 images the per-image budget is ~2.2 s (L40S, over 4370 images with
-`keep_largest` on; the default path now skips its 0.23 s):
+1 MP. Costs on 6240×4160 images (L40S, 4370 images); filling and component filtering
+only apply when explicitly enabled:
 
 | Stage | ~Time | Device |
 |-------|-------|--------|
@@ -95,8 +98,8 @@ straight to `postprocess_mask` — so `keep_largest`/`fill_holes` do morphology 
 | `ndimage.label` (`keep_largest`, off by default) | 0.23 s | CPU |
 | U²-Net inference | ~0.1–0.2 s | GPU |
 
-The GPU is mostly idle, so a masking job is CPU-bound: more `--cpus-per-task` helps, a bigger
-card does not. Postprocessing at model resolution and upscaling after would cut ~3-4x, but
+With filling enabled, the GPU is mostly idle and masking is CPU-bound: more
+`--cpus-per-task` helps, a bigger card does not. Postprocessing at model resolution and upscaling after would cut ~3-4x, but
 shifts mask boundaries (low-res hole-filling can miss thin structures) — a behaviour change to
 validate visually, not a free win. Verified against base.py and a timed 10-scene neurips run.
 
