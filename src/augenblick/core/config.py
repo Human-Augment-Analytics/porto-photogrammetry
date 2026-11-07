@@ -67,7 +67,11 @@ def add_dataclass_arguments(parser: argparse.ArgumentParser, config_cls: type) -
             (item_type,) = typing.get_args(annotation)
             kwargs.update(nargs="+", type=item_type, default=default)
         else:
-            kwargs.update(type=annotation, default=default)
+            kwargs["type"] = annotation
+            if default is dataclasses.MISSING:
+                kwargs["required"] = True
+            else:
+                kwargs["default"] = default
 
         parser.add_argument(*flags, **{k: v for k, v in kwargs.items() if v is not None or k == "default"})
 
