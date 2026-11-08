@@ -71,6 +71,10 @@ its return.
 
 Metrics files record `"metric_domain": "mask"` so that a file cannot be misread later.
 
+For native-texture versus training-photo mesh re-bakes, see
+[the photobake protocol](photobake-eval.md). That comparison shares geometry and
+held-out cameras, but is not a controlled color-source ablation by itself.
+
 ## 3. Geometric metrics
 
 `augenblick.eval.mesh` implements the scoring. The definition is the Tanks and Temples
