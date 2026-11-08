@@ -52,6 +52,9 @@ echo "Constraints: $CONSTRAINTS"
 # --- Submodules (light_glue + pytorch3d are git submodules) -------------------
 banner "Submodules"
 git submodule update --init src/libs/light_glue src/libs/pytorch3d
+case " $BACKENDS " in *" neuralangelo "*)
+    git submodule update --init --recursive src/libs/neuralangelo ;;
+esac
 
 # --- 1. PyTorch (arch-specific wheel index) -----------------------------------
 banner "1/9 PyTorch"
@@ -163,6 +166,12 @@ esac
 # --- 9. The augenblick package itself (the `augenblick` console script) -------
 banner "9/9 augenblick (editable)"
 $PIP install -e . --no-deps --no-build-isolation
+
+case " $BACKENDS " in *" neuralangelo "*)
+    banner "Neuralangelo dependencies and CUDA preflight"
+    PYTHON="$(command -v python)" bash "$SCRIPT_DIR/setup_neuralangelo.sh"
+    ;;
+esac
 
 # --- Verify -------------------------------------------------------------------
 banner "Verifying imports"
