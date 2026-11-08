@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 from sugar_utils.general_utils import str2bool
 from sugar_trainers.coarse_density import coarse_training_with_density_regularization
 from sugar_trainers.coarse_sdf import coarse_training_with_sdf_regularization
@@ -29,6 +30,8 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--iteration_to_load', 
                         type=int, default=7000, 
                         help='iteration to load.')
+    parser.add_argument('--resolution', type=int, default=-1,
+                        help='Input downscale (1/2/4/8) or target width; -1 caps width at 1600.')
     
     # Regularization for coarse SuGaR
     parser.add_argument('-r', '--regularization_type', type=str,
@@ -114,6 +117,7 @@ if __name__ == "__main__":
     if args.refinement_time == 'long':
         args.refinement_iterations = 15_000
         print('Using long refinement time.')
+    refined_mesh_path = None
     if args.export_uv_textured_mesh:
         print('Will export a UV-textured mesh as an .obj file.')
     if args.export_ply:
@@ -136,6 +140,7 @@ if __name__ == "__main__":
     coarse_args = AttrDict({
         'checkpoint_path': args.checkpoint_path,
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'iteration_to_load': args.iteration_to_load,
         'output_dir': coarse_output_dir,
         'eval': args.eval,
@@ -157,6 +162,7 @@ if __name__ == "__main__":
     # ----- Extract mesh from coarse SuGaR -----
     coarse_mesh_args = AttrDict({
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'checkpoint_path': args.checkpoint_path,
         'iteration_to_load': args.iteration_to_load,
         'coarse_model_path': coarse_sugar_path,
@@ -179,6 +185,7 @@ if __name__ == "__main__":
     # ----- Refine SuGaR -----
     refined_args = AttrDict({
         'scene_path': args.scene_path,
+        'resolution': args.resolution,
         'checkpoint_path': args.checkpoint_path,
         'mesh_path': coarse_mesh_path,      
         'output_dir': refined_output_dir,
@@ -201,6 +208,7 @@ if __name__ == "__main__":
     if args.export_uv_textured_mesh:
         refined_mesh_args = AttrDict({
             'scene_path': args.scene_path,
+            'resolution': args.resolution,
             'iteration_to_load': args.iteration_to_load,
             'checkpoint_path': args.checkpoint_path,
             'coarse_mesh_dir': coarse_mesh_output_dir,
@@ -215,4 +223,26 @@ if __name__ == "__main__":
             'postprocess_iterations': args.postprocess_iterations,
         })
         refined_mesh_path = extract_mesh_and_texture_from_refined_sugar(refined_mesh_args)
+
+    if args.output_path is not None:
+        manifest = {
+            "scene_path": os.path.abspath(args.scene_path),
+            "vanilla_checkpoint_path": os.path.abspath(args.checkpoint_path),
+            "iteration_to_load": args.iteration_to_load,
+            "refinement_iterations": args.refinement_iterations,
+            "coarse_model_path": os.path.abspath(coarse_sugar_path),
+            "coarse_mesh_path": os.path.abspath(coarse_mesh_path),
+            "refined_model_path": os.path.abspath(refined_sugar_path),
+            "textured_mesh_path": (
+                os.path.abspath(refined_mesh_path) if refined_mesh_path is not None else None
+            ),
+            "texture_square_size": args.square_size,
+            "eval": args.eval,
+            "resolution": args.resolution,
+        }
+        manifest_path = os.path.join(args.output_path, "run_manifest.json")
+        os.makedirs(args.output_path, exist_ok=True)
+        with open(manifest_path, "w") as handle:
+            json.dump(manifest, handle, indent=2)
+        print("Run manifest saved at:", manifest_path)
         
