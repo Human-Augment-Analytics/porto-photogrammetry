@@ -7,3 +7,6 @@
 [submodule "src/libs/gaussian_wrapping/submodules/Depth-Anything-V2"]
 	path = src/libs/gaussian_wrapping/submodules/Depth-Anything-V2
 	url = https://github.com/DepthAnything/Depth-Anything-V2.git
+[submodule "src/libs/neus2"]
+	path = src/libs/neus2
+	url = https://github.com/19reborn/NeuS2.git

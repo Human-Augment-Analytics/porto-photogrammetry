@@ -52,6 +52,9 @@ echo "Constraints: $CONSTRAINTS"
 # --- Submodules (light_glue + pytorch3d are git submodules) -------------------
 banner "Submodules"
 git submodule update --init src/libs/light_glue src/libs/pytorch3d
+case " $BACKENDS " in *" neus2 "*)
+    git submodule update --init --recursive src/libs/neus2 ;;
+esac
 
 # --- 1. PyTorch (arch-specific wheel index) -----------------------------------
 banner "1/9 PyTorch"
@@ -163,6 +166,12 @@ esac
 # --- 9. The augenblick package itself (the `augenblick` console script) -------
 banner "9/9 augenblick (editable)"
 $PIP install -e . --no-deps --no-build-isolation
+
+case " $BACKENDS " in *" neus2 "*)
+    banner "NeuS2 headless CUDA bindings"
+    PYTHON="$(command -v python)" bash "$SCRIPT_DIR/setup_neus2.sh"
+    ;;
+esac
 
 # --- Verify -------------------------------------------------------------------
 banner "Verifying imports"
