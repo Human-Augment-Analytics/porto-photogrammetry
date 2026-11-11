@@ -7,9 +7,9 @@ CONDA_ROOT="${CONDA_ROOT:-/blue/arthur.porto/srizvi63.gatech/conda}"
 CONDA_ENV="${CONDA_ENV:-$CONDA_ROOT/meshroom}"
 
 # --- AliceVision / Meshroom (mirrors the ~/.bashrc block in meshroom-setup.md) ---
-# Both live under /blue here, not $HOME/scratch as on PACE.
+# AliceVision lives under /blue, the Meshroom frontend under $HOME (not $HOME/scratch as on PACE).
 export ALICEVISION_ROOT="${ALICEVISION_ROOT:-/blue/arthur.porto/srizvi63.gatech/alicevision}"
-export MESHROOM_ROOT="${MESHROOM_ROOT:-/blue/arthur.porto/srizvi63.gatech/Meshroom}"
+export MESHROOM_ROOT="${MESHROOM_ROOT:-/home/srizvi63.gatech/meshroom}"
 
 export PATH="$ALICEVISION_ROOT/bin:$ALICEVISION_ROOT/lib:$PATH"
 export LD_LIBRARY_PATH="$ALICEVISION_ROOT/bin:$ALICEVISION_ROOT/lib:${LD_LIBRARY_PATH:-}"

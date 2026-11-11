@@ -2,7 +2,8 @@
 # Gaussian reconstruction, one array task per scene.
 # Usage: BACKEND=2dgs SFM=vggt sbatch hpg_slurm/recon.sbatch [extra flags]
 # One scene: sbatch --array=N ...   (N indexes the sorted scene list)
-# BACKEND=2dgs|sugar|pgsr|gw|geosvr|milo; SFM= picks the input SfM at <scene>/<SFM>/.
+# BACKEND=2dgs|sugar|pgsr|gw|geosvr|milo; SFM= picks the input SfM at <scene>/<SFM>/
+# (or SCENE_ROOT=<dir> reads <dir>/<scene> directly).
 # 64gb is NOT enough for 2DGS TSDF at --mesh_res 4096 on ~660 images (peaked 97 GiB RSS,
 # oom_killed); raise --mem there - nodes carry 515-2063 gb, so headroom is free.
 # milo (regular recipe, 432 views at 24 MP): 1h23m and 56 GiB peak RSS, inside the defaults
@@ -43,8 +44,14 @@ SFM="${SFM:-vggt}"
 
 discover_scenes
 select_scene
-# Reconstruction consumes an SfM result, not the prepared dataset.
-SCENE="$RESULT_ROOT/$SCENE_NAME/$SFM"
+# Reconstruction consumes an SfM result, not the prepared dataset. SCENE_ROOT=<dir> reads
+# <dir>/<scene> instead (e.g. DATA_ROOT once a prepared scene carries sparse/); SFM still
+# names the output.
+if [ -n "${SCENE_ROOT:-}" ]; then
+    SCENE="$SCENE_ROOT/$SCENE_NAME"
+else
+    SCENE="$RESULT_ROOT/$SCENE_NAME/$SFM"
+fi
 OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-$BACKEND"
 
 echo "scene      : $SCENE_NAME ($SCENE_INDEX of ${#SCENES[@]})"

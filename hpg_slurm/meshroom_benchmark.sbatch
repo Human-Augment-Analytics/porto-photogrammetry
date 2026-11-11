@@ -3,6 +3,7 @@
 # %1 is deliberate: MeshroomCache hits ~50 GB/scene, pruned after each. See README.md.
 # SFM=<dir> runs only the dense half on that SfM result's cameras and writes <dir>-meshroom;
 # submit it with -J <dir>-meshroom so the timing CSV names the method.
+# SCENE_ROOT=<dir> (with SFM) reads <dir>/<scene> instead of <scene>/<SFM>/.
 #SBATCH --job-name=meshroom
 #SBATCH --account=arthur.porto
 #SBATCH --partition=hpg-rtx6000
@@ -31,12 +32,24 @@ source "$SLURM_DIR/meshroom_common.sh"
 
 SFM="${SFM:-}"
 
+# Native mode reads the prepared dataset already, and only SFM names a from-SfM output.
+if [ -n "${SCENE_ROOT:-}" ] && [ -z "$SFM" ]; then
+    echo "ERROR: SCENE_ROOT needs SFM=<name>, which names the output <name>-meshroom" >&2
+    exit 2
+fi
+
 discover_scenes
 select_scene
 
 if [ -n "$SFM" ]; then
     # Consume an SfM result, not the prepared dataset; the native meshroom/ is untouched.
-    SCENE="$RESULT_ROOT/$SCENE_NAME/$SFM"
+    # SCENE_ROOT=<dir> reads <dir>/<scene> instead (e.g. DATA_ROOT once a prepared scene
+    # carries sparse/); SFM still names the output.
+    if [ -n "${SCENE_ROOT:-}" ]; then
+        SCENE="$SCENE_ROOT/$SCENE_NAME"
+    else
+        SCENE="$RESULT_ROOT/$SCENE_NAME/$SFM"
+    fi
     OUT="$RESULT_ROOT/$SCENE_NAME/$SFM-meshroom"
     if [ ! -d "$SCENE/sparse/0" ] || [ -z "$(ls -A "$SCENE/sparse/0" 2>/dev/null)" ]; then
         echo "ERROR: no SfM model at $SCENE/sparse/0 - run the $SFM SfM job for this scene first" >&2
