@@ -265,3 +265,115 @@ def test_sam3_raises_when_nothing_matches(tmp_path):
 
     with pytest.raises(SceneError, match="vertebra"):
         method.mask_for(_sam3_image(tmp_path))
+
+
+def test_masking_defaults_preserve_openings(tmp_path):
+    class Hollow(_StubMask):
+        def mask_for(self, path):
+            mask = super().mask_for(path)
+            mask[14:16, 19:21] = False
+            return mask
+
+    images = tmp_path / "in"
+    _make_images(images, 1)
+    Hollow(ThresholdConfig()).run(images, tmp_path / "unfilled")
+    Hollow(ThresholdConfig(fill_holes=True)).run(images, tmp_path / "filled")
+    assert np.asarray(Image.open(tmp_path / "unfilled/masks/img_000.png"))[14, 19] == 0
+    assert np.asarray(Image.open(tmp_path / "filled/masks/img_000.png"))[14, 19] == 255
+    assert Sam3Config().score_threshold == 0.3
+    assert not Sam3Config().fill_holes
+
+
+def test_fill_holes_is_an_opt_in_switch():
+    argv = ["mask", "sam3", "--images", "x", "--output", "y"]
+    assert not build_parser().parse_args(argv).fill_holes
+    assert build_parser().parse_args(argv + ["--fill_holes"]).fill_holes
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(argv + ["--no-fill_holes"])
+
+
+def test_interrupted_run_can_skip_completed_masks(tmp_path):
+    class Interrupted(_StubMask):
+        def mask_for(self, path):
+            if path.stem == "img_001":
+                raise KeyboardInterrupt
+            return super().mask_for(path)
+
+    images = tmp_path / "in"
+    _make_images(images, 3)
+    out = tmp_path / "out"
+    with pytest.raises(KeyboardInterrupt):
+        Interrupted(ThresholdConfig()).run(images, out)
+    result = _StubMask(ThresholdConfig(only_missing=True)).run(images, out)
+    assert result.num_reused == 1
+    assert result.num_written == 2
+    assert result.num_failed == 0
+
+
+def test_masking_refuses_adopted_directory_and_colliding_stems(tmp_path):
+    images = tmp_path / "in"
+    _make_images(images, 1)
+    out = tmp_path / "out"
+    out.mkdir()
+    adopted = tmp_path / "adopted"
+    adopted.mkdir()
+    (out / "masks").symlink_to(adopted)
+    with pytest.raises(SceneError, match="adopted"):
+        _StubMask(ThresholdConfig()).run(images, out)
+    Image.new("RGB", (40, 30)).save(images / "img_000.JPG")
+    with pytest.raises(SceneError, match="collide"):
+        _StubMask(ThresholdConfig()).run(images, tmp_path / "other")
+
+
+def test_cli_returns_failure_and_continues_after_image_error(tmp_path, monkeypatch):
+    import augenblick.cli.main as cli
+
+    class Failing(_StubMask):
+        def mask_for(self, path):
+            if path.stem == "img_000":
+                raise SceneError("no detection")
+            return super().mask_for(path)
+
+    images = tmp_path / "in"
+    _make_images(images, 2)
+    monkeypatch.setattr(cli, "get_method", lambda *args: Failing)
+    out = tmp_path / "out"
+    assert cli.main(["mask", "threshold", "--images", str(images), "--output", str(out)]) == 2
+    assert not (out / "masks/img_000.png").exists()
+    assert (out / "masks/img_001.png").exists()
+
+
+def test_masking_rejects_invalid_bounds_before_preparing(tmp_path):
+    images = tmp_path / "in"
+    _make_images(images, 1)
+    with pytest.raises(SceneError, match="foreground bounds"):
+        _StubMask(ThresholdConfig(min_foreground=0.8, max_foreground=0.2)).run(images, tmp_path / "out")
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_sam3_selects_checkpoint_before_building(tmp_path, monkeypatch, local):
+    import sys
+    from types import SimpleNamespace
+    import huggingface_hub
+
+    checkpoint = tmp_path / "weights.pt"
+    checkpoint.write_bytes(b"test weights")
+    downloads, builds = [], []
+
+    def download(**kwargs):
+        downloads.append(kwargs)
+        return str(checkpoint)
+
+    def build(**kwargs):
+        builds.append(kwargs)
+        return "model"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)))
+    monkeypatch.setitem(sys.modules, "sam3.model_builder", SimpleNamespace(build_sam3_image_model=build))
+    monkeypatch.setitem(sys.modules, "sam3.model.sam3_image_processor", SimpleNamespace(Sam3Processor=lambda *args, **kwargs: "processor"))
+    cfg = Sam3Config(checkpoint_path=str(checkpoint) if local else None)
+    assert Sam3Mask(cfg)._get_processor() == "processor"
+    assert builds == [{"device": "cuda", "checkpoint_path": str(checkpoint)}]
+    assert downloads == ([] if local else [{
+        "repo_id": "facebook/sam3", "filename": "sam3.pt", "revision": cfg.checkpoint_revision}])

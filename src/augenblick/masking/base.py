@@ -41,8 +41,8 @@ class MaskCommonConfig:
     keep_largest: bool = field(default=False, metadata={
         "help": "Keep only the largest connected foreground component; off by default "
                 "so detached foreground (scale bars, separated parts) survives"})
-    fill_holes: bool = field(default=True, metadata={
-        "help": "Fill enclosed background holes inside the silhouette"})
+    fill_holes: bool = field(default=False, metadata={
+        "help": "Fill interior background holes; closes specimen openings"})
     batch_log_every: int = field(default=25, metadata={
         "help": "Log progress every N images"})
 
@@ -81,7 +81,9 @@ def write_mask(mask, dest: Path) -> None:
     from PIL import Image
 
     arr = (np.asarray(mask, dtype=bool).astype(np.uint8)) * 255
-    Image.fromarray(arr, mode="L").save(dest, optimize=True)
+    temporary = dest.with_name(dest.name + ".tmp")
+    Image.fromarray(arr, mode="L").save(temporary, format="PNG", optimize=True)
+    os.replace(temporary, dest)
 
 
 class MaskMethod(ImagesInputMixin, Method[Path]):
@@ -123,7 +125,9 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
         from PIL import Image
 
         self.validate(images_dir)
-        self.prepare()
+        cfg = self.config
+        if not 0 <= cfg.min_foreground <= cfg.max_foreground <= 1:
+            raise SceneError("foreground bounds must satisfy 0 <= min <= max <= 1")
         Image.MAX_IMAGE_PIXELS = None
         images_dir = images_dir.resolve()
         out_dir = output_dir.resolve()
@@ -141,13 +145,17 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
             os.symlink(images_dir, images_link)
 
         masks_dir = out_dir / "masks"
+        if masks_dir.is_symlink():
+            raise SceneError("refusing to generate through an adopted mask-directory symlink")
         masks_dir.mkdir(parents=True, exist_ok=True)
 
         image_paths = sorted(
             p for p in images_dir.iterdir()
             if p.suffix in self.IMAGE_SUFFIXES and p.is_file())
 
-        cfg = self.config
+        if len({p.stem for p in image_paths}) != len(image_paths):
+            raise SceneError("image names collide on mask stems; use unique image stems")
+        self.prepare()
         result = MaskResult(
             output_dir=out_dir, elapsed=0.0, num_images=len(image_paths))
 
@@ -167,33 +175,22 @@ class MaskMethod(ImagesInputMixin, Method[Path]):
                     continue
                 try:
                     mask = self.mask_for(path)
+                    with Image.open(path) as im:
+                        expected = im.size[::-1]
+                    if mask.shape != expected:
+                        raise SceneError(f"mask is {mask.shape}, expected {expected}")
+                    mask = postprocess_mask(mask, cfg.keep_largest, cfg.fill_holes)
+                    frac = foreground_fraction(mask)
+                    if not mask.any() or not cfg.min_foreground <= frac <= cfg.max_foreground:
+                        raise SceneError(
+                            f"foreground fraction {frac:.3f} out of "
+                            f"[{cfg.min_foreground}, {cfg.max_foreground}], or empty mask")
+                    write_mask(mask, dest)
+                    result.num_written += 1
                 except Exception as exc:
-                    logger.warning(f"{path.name}: mask_for raised {type(exc).__name__}: {exc}")
+                    logger.warning(f"{path.name}: {type(exc).__name__}: {exc}")
                     result.num_failed += 1
                     dest.unlink(missing_ok=True)
-                    continue
-
-                with Image.open(path) as im:
-                    expected = im.size[::-1]
-                if mask.shape != expected:
-                    logger.warning(
-                        f"{path.name}: mask is {mask.shape}, expected {expected} — rejected")
-                    result.num_failed += 1
-                    dest.unlink(missing_ok=True)
-                    continue
-
-                mask = postprocess_mask(mask, cfg.keep_largest, cfg.fill_holes)
-                frac = foreground_fraction(mask)
-                if not (cfg.min_foreground <= frac <= cfg.max_foreground):
-                    logger.warning(
-                        f"{path.name}: foreground fraction {frac:.3f} out of "
-                        f"[{cfg.min_foreground}, {cfg.max_foreground}] — rejected")
-                    result.num_failed += 1
-                    dest.unlink(missing_ok=True)
-                    continue
-
-                write_mask(mask, dest)
-                result.num_written += 1
 
         timer.summary({
             "Output": out_dir,

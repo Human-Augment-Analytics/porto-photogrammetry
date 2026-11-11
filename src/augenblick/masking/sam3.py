@@ -21,12 +21,14 @@ class Sam3Config(MaskCommonConfig):
 
     prompt: str = field(default="skeleton", metadata={
         "help": "Text concept to segment, e.g. 'skeleton', 'fish skull', 'bone'"})
-    score_threshold: float = field(default=0.5, metadata={
+    score_threshold: float = field(default=0.3, metadata={
         "help": "Drop detections scoring below this before the masks are unioned"})
     max_detections: int = field(default=0, metadata={
         "help": "Keep only the N highest-scoring detections (0 = keep all above threshold)"})
     checkpoint_path: Optional[str] = field(default=None, metadata={
         "help": "Local SAM 3 checkpoint; default downloads from the gated HF repo"})
+    checkpoint_revision: str = field(default="3c879f39826c281e95690f02c7821c4de09afae7", metadata={
+        "help": "facebook/sam3 revision to download; ignored with --checkpoint_path"})
     device: str = field(default="cuda", metadata={"help": "CUDA device for the model (SAM 3 is GPU-only), e.g. cuda:1"})
 
 
@@ -53,6 +55,8 @@ class Sam3Mask(MaskMethod):
         """Build the model up front so a CUDA refusal or a gated-repo 401 aborts the run."""
         from huggingface_hub.errors import GatedRepoError, LocalEntryNotFoundError
 
+        if not 0 <= self.config.score_threshold <= 1 or self.config.max_detections < 0:
+            raise SceneError("SAM3 threshold must be in [0, 1] and max_detections nonnegative")
         try:
             self._get_processor()
         except (GatedRepoError, LocalEntryNotFoundError) as exc:
@@ -74,11 +78,19 @@ class Sam3Mask(MaskMethod):
             raise SceneError(
                 "SAM 3 is GPU-only and torch reports no CUDA device; run it on a GPU node.")
 
-        logger.info(f"building SAM 3 image model on {self.config.device} "
-                    f"(checkpoint: {self.config.checkpoint_path or 'HF facebook/sam3'})")
+        if self.config.checkpoint_path:
+            checkpoint = Path(self.config.checkpoint_path).expanduser().resolve()
+        else:
+            from huggingface_hub import hf_hub_download
+            checkpoint = Path(hf_hub_download(
+                repo_id="facebook/sam3", filename="sam3.pt",
+                revision=self.config.checkpoint_revision))
+        if not checkpoint.is_file():
+            raise SceneError(f"checkpoint does not exist: {checkpoint}")
+        logger.info(f"building SAM 3 on {self.config.device}; checkpoint {checkpoint}")
         model = build_sam3_image_model(
             device=self.config.device,
-            checkpoint_path=self.config.checkpoint_path,  # None -> HF download
+            checkpoint_path=str(checkpoint),
         )
         # The processor applies confidence_threshold inside its grounding forward, before the
         # surviving masks are interpolated to full resolution - cheaper than filtering after.
