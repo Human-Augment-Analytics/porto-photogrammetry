@@ -401,7 +401,8 @@ def test_geosvr_eval_also_renders_held_out_views(tmp_path):
     assert [s.name for s in stages] == ["GeoSVR training", "Rendering", "TSDF mesh extraction"]
     assert stages[0].cmd[-2:] == ["--test_iterations", "-1"]
     # One call renders both splits: held-out views for scoring, train views for TSDF colour.
-    assert stages[1].cmd == [sys.executable, str(GEOSVR / "render.py"), "-m", "/out"]
+    assert stages[1].cmd == [sys.executable, str(GEOSVR / "render.py"), "-m", "/out",
+                             "--canonical_test_resolution", "-1"]
 
 
 def test_geosvr_always_renders_train_views_for_tsdf(tmp_path):

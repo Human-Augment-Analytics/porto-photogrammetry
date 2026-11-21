@@ -203,6 +203,10 @@ def read_colmap_dataset(path, images, eval, test_every=8, depth_paths="", n_spar
     else:
         suggested_bounding = None
 
+    # Record the actual selected camera-info partition before DataPack resizing.
+    from augenblick.eval.selection import record_selection
+    record_selection(path, path, train_cam_infos, test_cam_infos, 'camera_info_original')
+
     # Pack scene info
     scene_info = SceneInfo(
         train_cam_infos=train_cam_infos,

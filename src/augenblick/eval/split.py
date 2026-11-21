@@ -108,6 +108,10 @@ def check_split(split: dict, stems) -> dict:
         if not isinstance(split.get(side), list) or not split[side]:
             raise SceneError(f"split has no {side} views")
     train, test = set(split["train"]), set(split["test"])
+    if len(train) != len(split["train"]) or len(test) != len(split["test"]):
+        raise SceneError("split contains duplicate views")
+    if train | test != set(stems):
+        raise SceneError("split must partition every registered view")
     overlap = train & test
     if overlap:
         raise SceneError("views in both train and test: "

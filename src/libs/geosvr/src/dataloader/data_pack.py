@@ -22,6 +22,15 @@ from src.cameras import Camera, MiniCam
 AUTO_MAX_N_PIXELS = 1024 ** 2
 AUTO_WARN = False
 
+def select_neighbor_indices(angle_row, distance_row, cap=8, max_angle=30,
+                            min_distance=0.01, max_distance=1.5):
+    """Keep the cap local to each camera, including after a zero-neighbor view."""
+    order = np.lexsort((angle_row, distance_row))
+    eligible = ((angle_row[order] < max_angle) & (distance_row[order] > min_distance)
+                & (distance_row[order] < max_distance))
+    return order[eligible][:cap]
+
+
 class DataPack:
 
     def __init__(self, cfg_data, white_background=False, dataset_downscales=[1.0], camera_params_only=False):
@@ -95,14 +104,10 @@ class DataPack:
                 # LOCAL PATCH (augenblick): upstream also wrote multi_view.json into the input
                 # scene; nothing reads it, so only the in-memory nearest views are kept.
                 for id, cur_cam in enumerate(self._cameras['train'][dataset_downscale]):
-                    sorted_indices = np.lexsort((angles[id], diss[id]))
-                    # sorted_indices = np.lexsort((diss[id], angles[id]))
-                    mask = (angles[id][sorted_indices] < multi_view_max_angle) & \
-                        (diss[id][sorted_indices] > multi_view_min_dis) & \
-                        (diss[id][sorted_indices] < multi_view_max_dis)
-                    sorted_indices = sorted_indices[mask]
-                    multi_view_num = min(multi_view_num, len(sorted_indices))
-                    for index in sorted_indices[:multi_view_num]:
+                    sorted_indices = select_neighbor_indices(
+                        angles[id], diss[id], multi_view_num, multi_view_max_angle,
+                        multi_view_min_dis, multi_view_max_dis)
+                    for index in sorted_indices:
                         cur_cam.nearest_id.append(index)
                         cur_cam.nearest_names.append(self._cameras['train'][dataset_downscale][index].image_name)
                     # print(f"frame {cur_cam.image_name}, neareast {cur_cam.nearest_names}, \

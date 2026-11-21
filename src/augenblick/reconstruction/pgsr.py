@@ -73,33 +73,43 @@ class PgsrBackend(SubprocessBackend):
         scene_dir = scene.root
         pgsr_scene = output_dir / "scene"
 
-        if pgsr_scene.exists():
-            logger.info(f"Prepared scene already exists at {pgsr_scene}, reusing")
-            # A copy prepared by an earlier non-eval run has no split.json, and PGSR would
-            # then fall back to its own llffhold rule while the other backends used the file.
-            copy_split(scene_dir, pgsr_scene)
-            return Scene(pgsr_scene)
-
-        logger.info(f"Linking scene from {scene_dir} into {pgsr_scene}")
-        pgsr_scene.mkdir(parents=True)
-        for subdir in ["images", "masks"]:
-            src = scene_dir / subdir
-            if src.is_dir():
-                (pgsr_scene / subdir).symlink_to(src.resolve(), target_is_directory=True)
-        # PGSR reads split.json from the copy, so the held-out set has to travel with it.
-        copy_split(scene_dir, pgsr_scene)
-
-        sparse_0 = scene_dir / "sparse" / "0"
+        import json
+        from augenblick.bench.digest import model_file_digests
+        adapter = scene.root
+        # Refresh a flat, private view on every call; all source files remain read-only.
+        if pgsr_scene.is_symlink():
+            raise ValueError("PGSR scene must be private")
+        pgsr_scene.mkdir(parents=True, exist_ok=True)
+        for name in ("images", "masks"):
+            link = pgsr_scene / name
+            source = adapter / name
+            if not source.is_dir():
+                if link.is_symlink(): link.unlink()
+                continue
+            if link.exists() and not link.is_symlink():
+                raise ValueError(f"refusing to replace real PGSR input {link}")
+            if link.is_symlink(): link.unlink()
+            link.symlink_to((adapter / name).resolve(), target_is_directory=True)
         sparse = pgsr_scene / "sparse"
-        if sparse_0.is_dir():
-            logger.info("Flattening sparse/0/ -> sparse/ as links")
-            sparse.mkdir()
-            for item in sparse_0.iterdir():
-                (sparse / item.name).symlink_to(item.resolve())
-        else:
-            logger.info("No sparse/0/ found; assuming sparse/ is already flat")
-            sparse.symlink_to((scene_dir / "sparse").resolve(), target_is_directory=True)
-
+        if sparse.is_symlink(): sparse.unlink()
+        sparse.mkdir(exist_ok=True)
+        signature = model_file_digests(scene.model_dir) or {}
+        record = sparse / "_source_model.json"
+        old = json.loads(record.read_text()) if record.is_file() else None
+        if old != signature:
+            for cached in sparse.glob("*.ply"): cached.unlink()
+        wanted = set(signature)
+        for path in list(sparse.iterdir()):
+            if path.suffix in (".bin", ".txt") and path.name not in wanted:
+                if not path.is_symlink(): raise ValueError(f"unexpected PGSR model file {path}")
+                path.unlink()
+        for name in wanted:
+            link = sparse / name
+            if link.exists() and not link.is_symlink(): raise ValueError(f"unexpected PGSR model file {link}")
+            if link.is_symlink(): link.unlink()
+            link.symlink_to((scene.model_dir / name).resolve())
+        record.write_text(json.dumps(signature, sort_keys=True) + "\n")
+        copy_split(scene.root, pgsr_scene)
         return Scene(pgsr_scene)
 
     def stages(self, scene: Scene, output_dir: Path) -> list[Stage]:

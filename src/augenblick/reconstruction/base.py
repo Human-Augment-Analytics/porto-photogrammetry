@@ -1,5 +1,6 @@
 """Shared shape of the reconstruction backends: validate, prepare, run staged subprocesses."""
 import logging
+import json
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +51,9 @@ class EvalParams:
     A base class rather than a duck-typed field name, so eval_enabled has a contract to
     check instead of probing for an attribute that may or may not exist.
     """
+
+    score: bool = field(default=True, metadata={
+        "help": "Score held-out renders after reconstruction; --no-score leaves scoring to the workflow"})
 
     eval: bool = field(default=False, metadata={
         "help": "Hold out views for novel-view evaluation, from the scene's split.json"})
@@ -163,6 +167,9 @@ class SubprocessBackend(ReconstructionMethod):
         """Key/value lines logged in the closing summary."""
         return {"Output": output_dir, "Mesh": self.mesh_path(output_dir)}
 
+    def finalize(self, scene: Scene, output_dir: Path) -> None:
+        """Publish backend-specific metadata after all subprocesses succeed."""
+
     def run(self, scene: Scene, output_dir: Path) -> StageResult:
         """Validate, prepare the scene, run each stage under a timer, then score any held-out views.
 
@@ -175,6 +182,8 @@ class SubprocessBackend(ReconstructionMethod):
             when the run held views out.
         """
         self.validate(scene)
+        if output_dir.is_symlink():
+            raise SceneError("computed reconstruction output must not be an adopted symlink")
         output_dir.mkdir(parents=True, exist_ok=True)
         # Written before prepare() so a backend that copies the scene carries the split with it,
         # which is what keeps the held-out set identical across backends.
@@ -188,13 +197,17 @@ class SubprocessBackend(ReconstructionMethod):
         for stage in stages:
             with timer.stage(stage.name):
                 process.run(stage.cmd, cwd=cwd)
+        self.finalize(prepared, output_dir)
         timer.summary(self.footer(output_dir))
+        (output_dir / "stage_timings.json").write_text(json.dumps({
+            "scope": "backend subprocess stages including native reporting/rendering/extraction; excludes preparation and shared NVS scoring",
+            "stages": dict(timer.elapsed), "seconds": timer.total}, indent=2) + "\n")
 
         details: dict[str, object] = {
             "mesh": self.mesh_path(output_dir),
             "stages": dict(timer.elapsed),
         }
-        if self.eval_enabled:
+        if self.eval_enabled and self.config.score:
             metrics = self.evaluate(prepared, output_dir)
             if metrics is not None:
                 logger.info(f"Held-out views: PSNR {metrics['psnr']:.2f}  "

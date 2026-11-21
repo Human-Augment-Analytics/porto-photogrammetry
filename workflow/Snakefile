@@ -1,5 +1,7 @@
 # Benchmark workflow; see docs/benchmark-trees.md for usage.
 import json
+import os
+import shlex
 from pathlib import Path
 
 TREE = Path(config["tree"]).resolve()
@@ -15,12 +17,18 @@ REFERENCES = CONF.get("references", {})
 PAIRED = sorted(REFERENCES)
 MODEL_STAGE = CONF.get("scale_model_stage", "sfm")
 SPLIT = CONF.get("split")
+EVALUATION_RESOLUTION = CONF.get("nvs_resolution", -1)
+if type(EVALUATION_RESOLUTION) is not int or EVALUATION_RESOLUTION == 0 or EVALUATION_RESOLUTION < -1:
+    raise ValueError("nvs_resolution must be -1 or a positive integer downscale")
 
 # Backend mesh paths can be overridden by the tree config.
 MESH_PATHS = {
     "2dgs": "train/ours_30000/fuse_post.ply",
     "pgsr": "mesh/tsdf_fusion_post.ply",
     "gw": "mesh_ours_2pivots_post.ply",
+    "milo": "mesh_regular_tsdf_res4096_post.ply",
+    "geosvr": "mesh/tsdf/tsdf_fusion_post.ply",
+    "meshroom": "textured_mesh/texturedMesh.obj",
 }
 MESH_PATHS.update(CONF.get("mesh_paths", {}))
 
@@ -38,7 +46,39 @@ _recipes = TREE / CONF.get("recipes", "recipes.json")
 RECIPES = json.loads(_recipes.read_text()) if _recipes.is_file() else {}
 
 # Pin imports to this checkout.
-shell.prefix(f"set -euo pipefail; export PYTHONPATH={REPO}/src; ")
+shell.prefix("set -euo pipefail; export PYTHONPATH=" + shlex.quote(str(REPO / "src") + ":" + os.environ.get("PYTHONPATH", "")) + "; ")
+
+
+def backend_arguments(wildcards):
+    arguments = CONF.get("backend_args", {}).get(wildcards.backend, [])
+    if not isinstance(arguments, list) or not all(isinstance(a, str) for a in arguments):
+        raise ValueError("backend_args must contain lists of CLI strings")
+    forbidden = {"--scene", "--output", "--eval", "--score", "--no-score"}
+    if any(a.split("=", 1)[0] in forbidden for a in arguments):
+        raise ValueError("workflow owns scene, output, split and scoring flags")
+    if wildcards.backend == "geosvr" and SPLIT:
+        if any(a.split("=", 1)[0] == "--evaluation_resolution" for a in arguments):
+            raise ValueError("workflow owns GeoSVR evaluation_resolution; set nvs_resolution in the tree")
+        arguments = [*arguments, "--evaluation_resolution", str(EVALUATION_RESOLUTION)]
+    return shlex.join(a.replace("{specimen}", wildcards.specimen).replace("{tree}", str(TREE))
+                      for a in arguments)
+
+
+def auxiliary_inputs(wildcards):
+    arguments = CONF.get("backend_args", {}).get(wildcards.backend, [])
+    paths = []
+    for index, argument in enumerate(arguments):
+        flag, separator, value = argument.partition("=")
+        if flag in ("--sfmdata", "--template"):
+            value = value if separator else arguments[index + 1]
+            paths.append(value.replace("{specimen}", wildcards.specimen).replace("{tree}", str(TREE)))
+    return paths
+
+
+def training_memory(wildcards):
+    resources = CONF.get("training_resources", {})
+    overrides = resources.get("mem_overrides", {}).get(wildcards.backend, {})
+    return int(overrides.get(wildcards.specimen, resources.get("mem_mb", 128000)))
 
 
 def scene(specimen):
@@ -140,6 +180,8 @@ rule splits:
     """Write or validate the configured view split."""
     input:
         model=lambda w: model(w.specimen),
+        manual=lambda w: ([TREE / CONF.get("manual_splits", "splits_manual") / w.specimen
+                           / "split.json"] if SPLIT == "manual" else []),
     output:
         split=TREE / "splits" / "{specimen}" / "split.json",
         stamp=TREE / "splits" / "{specimen}" / "split.stamp",
@@ -157,48 +199,63 @@ rule splits:
 
 
 rule train:
-    """Train in a staged scene; --eval enables the configured split."""
+    """Train and render once; scoring is the separate NVS rule's responsibility."""
     input:
         model=lambda w: model(w.specimen),
         split=lambda w: ([TREE / "splits" / w.specimen / "split.stamp"] if SPLIT else []),
+        images=lambda w: TREE / "inputs" / "images" / w.specimen,
+        masks=lambda w: TREE / "inputs" / "masks" / w.specimen,
+        auxiliary=auxiliary_inputs,
     output:
         stamp=TREE / "{backend}" / "{specimen}" / "model.stamp",
     params:
-        scene=lambda w: TREE / "work" / "scenes" / w.specimen,
+        scene=lambda w: TREE / "work" / "scenes" / w.backend / w.specimen,
         sfm=lambda w: TREE / MODEL_STAGE / w.specimen,
         out=lambda w: TREE / w.backend / w.specimen,
         mesh=lambda w: mesh_of(w.backend, w.specimen),
         split=lambda w: TREE / "splits" / w.specimen / "split.json",
-        eval_flag="--eval" if SPLIT else "",
+        eval_flag="--eval --no-score" if SPLIT else "",
+        images=lambda w: TREE / "inputs" / "images" / w.specimen,
+        masks=lambda w: TREE / "inputs" / "masks" / w.specimen,
+        split_arg=lambda w: (f"--split {TREE / 'splits' / w.specimen / 'split.json'}" if SPLIT else ""),
+        backend_args=backend_arguments,
+        csv_args=lambda w: (f"--csv {TREE}/_timing/sfm_timings.csv --method {w.backend} "
+                            f"--scene-name {w.specimen} --images {TREE / 'inputs/images' / w.specimen} "
+                            f"--split {TREE / 'splits' / w.specimen / 'split.json'}" if SPLIT else ""),
+        auxiliary=lambda w: shlex.join(part for i, path in enumerate(auxiliary_inputs(w))
+                                       for part in ("--input", f"auxiliary_{i}={path}")),
     wildcard_constraints:
         backend="|".join(BACKENDS),
     resources:
-        mem_mb=128000, runtime=240, cpus_per_task=8,
+        mem_mb=training_memory,
+        runtime=lambda w: int(CONF.get("training_resources", {}).get("minutes_overrides", {}).get(
+            w.backend, CONF.get("training_resources", {}).get("minutes", 240))),
+        cpus_per_task=int(CONF.get("training_resources", {}).get("cpus", 8)),
         slurm_extra="--partition=hpg-rtx6000 --gpus=1",
     shell:
-        "mkdir -p {params.scene} && "
-        "for part in images masks masks_colmap sparse; do "
-        "  rm -f {params.scene}/$part; "
-        "  test -e {params.sfm}/$part && ln -s {params.sfm}/$part {params.scene}/$part; "
-        "done; "
-        "if [ -n '{params.eval_flag}' ]; then cp {params.split} {params.scene}/split.json; "
-        "else rm -f {params.scene}/split.json; fi && "
-        "{AUGENBLICK} recon {wildcards.backend} --scene {params.scene} "
-        "  --output {params.out} {params.eval_flag} && "
+        "{PYTHON} -m augenblick.bench.scene --sfm {params.sfm} "
+        "  --images {params.images} --masks {params.masks} --out {params.scene} {params.split_arg} && "
+        "{PYTHON} -m augenblick.bench.timing --out {params.out}/command_timing.json {params.csv_args} -- "
+        "  {AUGENBLICK} recon {wildcards.backend} --scene {params.scene} "
+        "  --output {params.out} {params.eval_flag} {params.backend_args} && "
         "{PYTHON} -m augenblick.bench.stamp --artefact {params.mesh} "
         "  --out {output.stamp} --repo {REPO} --input model={input.model} "
-        "  --input split={params.split}"
+        "  --input split={params.split} --input masks={params.masks} --input images={params.images} {params.auxiliary}"
 
 
 rule nvs:
     """Score the held-out renders."""
     input:
         model=lambda w: TREE / w.backend / w.specimen / "model.stamp",
+        scoring_sources=[REPO / "src/augenblick/eval" / name for name in ("nvs.py", "metrics.py", "mesh_render.py")],
+        masks=lambda w: TREE / "inputs/masks" / w.specimen,
+        images=lambda w: TREE / "inputs/images" / w.specimen,
     output:
         metrics=TREE / "nvs" / "{backend}" / "{specimen}" / "nvs_metrics.json",
         stamp=TREE / "nvs" / "{backend}" / "{specimen}" / "nvs.stamp",
     params:
-        scene=lambda w: TREE / "work" / "scenes" / w.specimen,
+        resolution=EVALUATION_RESOLUTION,
+        scene=lambda w: TREE / "work" / "scenes" / w.backend / w.specimen,
         out=lambda w: TREE / w.backend / w.specimen,
         split=lambda w: TREE / "splits" / w.specimen / "split.json",
     wildcard_constraints:
@@ -207,7 +264,9 @@ rule nvs:
         mem_mb=32000, runtime=120, cpus_per_task=4,
         slurm_extra="--partition=hpg-rtx6000 --gpus=1",
     shell:
-        "{PYTHON} -m augenblick.eval.nvs --scene {params.scene} --output {params.out} && "
+        "{PYTHON} -m augenblick.bench.timing --out {output.metrics}.timing.json -- "
+        "  {PYTHON} -m augenblick.eval.nvs --scene {params.scene} --output {params.out} "
+        "  --require-masks --require-complete --canonical-images --require-native-raster --canonical-resolution {params.resolution} && "
         "cp {params.out}/nvs_metrics.json {output.metrics} && "
         "{PYTHON} -m augenblick.bench.stamp --artefact {output.metrics} "
         "  --out {output.stamp} --repo {REPO} --input split={params.split}"
