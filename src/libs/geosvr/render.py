@@ -36,6 +36,20 @@ from src.utils import mono_utils
 from src.utils.graphics_utils import render_normal_func
 
 
+def canonical_test_view(view, photograph, resolution):
+    """Clone only an evaluation camera; preserve native training cameras/calibration."""
+    from PIL import Image
+    from augenblick.eval.mesh_render import image_size
+
+    with Image.open(photograph) as original:
+        size = image_size({"width": original.width, "height": original.height}, resolution)
+        truth = original.convert("RGB").resize(size, Image.Resampling.BICUBIC)
+    camera = view.clone_mini()
+    camera.image_name = view.image_name
+    camera.image_width, camera.image_height = size
+    return camera, truth
+
+
 @torch.no_grad()
 def render_set(name, iteration, suffix, args, views, voxel_model, data_pack=None):
 
@@ -64,7 +78,17 @@ def render_set(name, iteration, suffix, args, views, voxel_model, data_pack=None
     }
     tr_render_opt["vox_feats"] = voxel_model.octlevel.detach() * 1.0
     
-    if not args.eval_fps:
+    canonical_test = name == "test" and args.canonical_test_resolution is not None
+    originals = {}
+    if canonical_test:
+        from pathlib import Path
+        source = Path(cfg.data.source_path) / cfg.data.images
+        for path in source.iterdir():
+            if path.is_file() and path.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
+                if path.stem in originals:
+                    raise ValueError("ambiguous original photograph stem: " + path.stem)
+                originals[path.stem] = path
+    if not args.eval_fps and not canonical_test:
         # LOCAL PATCH (augenblick): cache priors under the output dir, never in the input scene.
         mono_utils.prepare_depthanythingv2(
             cameras=views,
@@ -74,10 +98,16 @@ def render_set(name, iteration, suffix, args, views, voxel_model, data_pack=None
     eps_time = time.time()
     psnr_lst = []
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        render_pkg = voxel_model.render(view, **tr_render_opt)
+        render_camera = view
+        canonical_truth = None
+        if canonical_test:
+            render_camera, canonical_truth = canonical_test_view(
+                view, originals[view.image_name], args.canonical_test_resolution)
+        render_pkg = voxel_model.render(render_camera, **tr_render_opt)
         if not args.eval_fps:
             rendering = render_pkg['color']
-            gt = view.image.cuda()
+            gt = (torch.from_numpy(np.asarray(canonical_truth, dtype=np.float32).copy() / 255)
+                  .permute(2, 0, 1).cuda() if canonical_test else view.image.cuda())
             mse = (rendering.clip(0,1) - gt.clip(0,1)).square().mean()
             psnr = -10 * torch.log10(mse)
             psnr_lst.append(psnr.item())
@@ -95,7 +125,7 @@ def render_set(name, iteration, suffix, args, views, voxel_model, data_pack=None
                 im_tensor2np(gt)
             )
             
-            if args.rgb_only:
+            if args.rgb_only or canonical_test:
                 continue
             # Alpha
             imageio.imwrite(
@@ -158,6 +188,16 @@ def render_set(name, iteration, suffix, args, views, voxel_model, data_pack=None
 
 
             
+    if canonical_test:
+        import json
+        from pathlib import Path
+        (Path(render_path).parent / "render_protocol.json").write_text(json.dumps({
+            "held_out_direct_canonical_raster": True,
+            "resolution": args.canonical_test_resolution,
+            "original_photograph_resize": "PIL BICUBIC; floor dimensions",
+            "training_resolution_unchanged": True,
+            "camera_intrinsics": "FoV and normalized principal point preserved",
+            "views": [v.image_name for v in views]}, indent=2) + "\n")
     torch.cuda.synchronize()
     eps_time = time.time() - eps_time
     peak_mem = torch.cuda.memory_stats()["allocated_bytes.all.peak"] / 1024 ** 3
@@ -190,6 +230,8 @@ if __name__ == "__main__":
     parser.add_argument("--clear_res_down", action="store_true")
     parser.add_argument("--suffix", default="", type=str)
     parser.add_argument("--rgb_only", action="store_true")
+    parser.add_argument("--canonical_test_resolution", type=int, default=None,
+                        help="Render only held-out RGB directly at the common floor raster; -1 caps long side at1600")
     parser.add_argument("--use_jpg", action="store_true")
     parser.add_argument("--overwrite_ss", default=None, type=float)
     parser.add_argument("--overwrite_vox_geo_mode", default=None)

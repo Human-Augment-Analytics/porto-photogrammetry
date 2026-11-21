@@ -1,0 +1,28 @@
+# HiPerGator SLURM profile; run from the experiment directory.
+# Partition/GPU requests come from each rule's slurm_extra.
+cluster:
+  sbatch
+  --account=arthur.porto
+  --qos=arthur.porto
+  {resources.slurm_extra}
+  --job-name=bench-{rule}
+  --cpus-per-task={resources.cpus_per_task}
+  --mem={resources.mem_mb}
+  --time={resources.runtime}
+  --output=work/logs/{rule}-%j.out
+  --error=work/logs/{rule}-%j.err
+  --mail-type=NONE
+  --parsable
+cluster-status: status-sacct.sh
+cluster-cancel: scancel
+jobs: 4
+latency-wait: 60
+restart-times: 0
+keep-going: true
+printshellcmds: true
+rerun-incomplete: true
+default-resources:
+  - mem_mb=8000
+  - runtime=120
+  - cpus_per_task=2
+  - slurm_extra="--partition=hpg-default"

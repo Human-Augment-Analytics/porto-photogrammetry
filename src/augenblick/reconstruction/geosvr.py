@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 from augenblick.core.registry import register_reconstruction
+from augenblick.core.errors import SceneError
 from augenblick.core.scene import Scene
 from augenblick.reconstruction.base import (
     LIBS_DIR, EvalParams, ResolutionParams, Stage, SubprocessBackend, require_registered_masks)
@@ -26,6 +27,9 @@ MAX_LONG_SIDE = 1600
 @dataclass(frozen=True)
 class GeosvrConfig(EvalParams, ResolutionParams):
     """Training and mesh-extraction parameters forwarded to GeoSVR."""
+
+    evaluation_resolution: int = field(default=-1, metadata={
+        "help": "Held-out evaluation downscale, independent of training; -1 caps the long side at1600"})
 
     preset: Literal["dtu", "tnt", "none"] = field(default="dtu", metadata={
         "help": "Upstream cfg/<preset>_mesh.yaml loaded before the flags; dtu suits masked objects"})
@@ -77,12 +81,19 @@ class GeosvrBackend(SubprocessBackend):
     backend_dir: ClassVar[Path] = GEOSVR_DIR
     title: ClassVar[str] = "GeoSVR Reconstruction Pipeline"
 
+    def finalize(self, scene: Scene, output_dir: Path) -> None:
+        # GeoSVR does not export the COLMAP camera snapshot required by benchmark lineage.
+        from augenblick.eval.cameras import export_cameras
+        export_cameras(scene.model_dir, output_dir / "cameras.json")
+
     def validate(self, scene: Scene) -> None:
         """Also require a mask for every registered image when the mask loss is on.
 
         Raises:
             SceneError: If lambda_mask > 0 and any registered image lacks masks/<stem>.png.
         """
+        if self.config.eval and (self.config.evaluation_resolution == 0 or self.config.evaluation_resolution < -1):
+            raise SceneError("evaluation_resolution must be -1 or a positive downscale")
         super().validate(scene)
         require_registered_masks(scene, self.config.lambda_mask)
 
@@ -156,6 +167,8 @@ class GeosvrBackend(SubprocessBackend):
         render_cmd = [sys.executable, str(RENDER_SCRIPT), "-m", str(output_dir)]
         if not c.eval:
             render_cmd.append("--skip_test")
+        else:
+            render_cmd += ["--canonical_test_resolution", str(c.evaluation_resolution)]
 
         return [
             Stage("GeoSVR training", train_cmd),

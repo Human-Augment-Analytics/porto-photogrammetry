@@ -19,6 +19,7 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | Method | Description |
 |--------|-------------|
 | COLMAP | Classical incremental SfM with SIFT features and bundle adjustment |
+| GLOMAP | Global mapping using the same masked COLMAP feature extraction and matching |
 | VGGT | Feed-forward transformer that regresses camera parameters and a point map in a single pass |
 | VGGT + BA | VGGT output refined by VGGSfM tracking and bundle adjustment |
 | DVLT | NVIDIA Deja View looping transformer: feed-forward poses and points, like VGGT without BA |
@@ -34,6 +35,7 @@ Modern photogrammetry pipelines are two-stage: an SfM method first estimates cam
 | PGSR | Planar-consistent Gaussians with multi-view geometric/photometric losses and TSDF meshing |
 | Gaussian Wrapping | Stochastic oriented Gaussians with pivot-based marching-tetrahedra extraction and texture refinement |
 | GeoSVR | Sparse-voxel octree (SVRaster) with a Depth-Anything-V2 depth prior, multi-view regularisers and TSDF meshing |
+| MILo | Gaussian splatting with mesh-in-the-loop regularisation and SDF or TSDF mesh extraction |
 
 All combinations are benchmarked on runtime and compared qualitatively against RealityScan (commercial) and Meshroom (open-source) baselines.
 
@@ -81,7 +83,7 @@ declares no dependencies of its own, so pip must not touch the pinned numpy/torc
 pip install -e . --no-deps --no-build-isolation
 ```
 
-Use `BACKENDS="2dgs pgsr"` to install a subset of backends (default: `sugar 2dgs pgsr gw geosvr`), or `SKIP_TETRA=1` to skip the
+Use `BACKENDS="2dgs pgsr"` to install a subset of backends (default: `sugar 2dgs pgsr gw geosvr milo`), or `SKIP_TETRA=1` to skip the
 Gaussian Wrapping CGAL build.
 
 numpy and the packages built against its C-ABI (`scipy`, `scikit-learn`, `scikit-image`) are
@@ -154,8 +156,8 @@ augenblick/
 │   ├── augenblick/            # The pipeline package (provides the `augenblick` CLI)
 │   │   ├── core/              #   Scene, config↔argparse bridge, registry, process, timing
 │   │   ├── masking/           #   rembg, threshold, sam3
-│   │   ├── sfm/               #   vggt, dvlt, colmap, turntable, hull
-│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw, geosvr
+│   │   ├── sfm/               #   vggt, dvlt, colmap, glomap, turntable, hull
+│   │   ├── reconstruction/    #   2dgs, sugar, pgsr, gw, geosvr, milo
 │   │   ├── eval/              #   Held-out split, masked NVS metrics, mesh scoring, metric scale
 │   │   └── cli/               #   Argument parsing and exit codes
 │   ├── libs/                  # Third-party backends (vendored + submodules)
@@ -466,6 +468,11 @@ scaled mesh is then scored rigidly against a structured-light reference. The ful
 gates and an end-to-end walkthrough (detection, the bar codebook, scaling, scoring) are in
 [docs/scale-protocol.md](docs/scale-protocol.md); the HiPerGator stages are
 `hpg_slurm/scale_markers.sbatch` and `hpg_slurm/geometry_eval.sbatch`.
+
+To run the whole chain reproducibly over a collection, rather than a specimen at a time,
+see [docs/benchmark-trees.md](docs/benchmark-trees.md). `workflow/Snakefile` fills a
+benchmark tree stage by stage and records what every result was derived from; the stages
+are joined by digest stamps, with input and code provenance recorded beside each result.
 
 ### Output
 

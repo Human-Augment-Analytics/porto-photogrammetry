@@ -9,6 +9,7 @@ surround.
 Usage:  python -m augenblick.eval.nvs --scene <scene> --output <model_dir>
 """
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -38,18 +39,37 @@ def render_iteration(name: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def find_test_dir(test_root: Path, iteration: int | None = None) -> Path:
-    """Locate the held-out render directory a backend wrote under its test root."""
+def find_test_dir(test_root: Path, iteration: int | None = None,
+                  render_variant: str | None = None) -> Path:
+    """Select one render variant; never guess between same-iteration outputs."""
+    if render_variant is not None:
+        if Path(render_variant).name != render_variant or render_variant in (".", ".."):
+            raise SceneError("render variant must name one direct subdirectory")
+        selected = test_root / render_variant
+        selected_iteration = render_iteration(render_variant)
+        if selected_iteration is None or not selected.is_dir():
+            raise SceneError(f"no supported render variant {render_variant} under {test_root}")
+        if iteration is not None and selected_iteration != iteration:
+            raise SceneError("render variant does not match the requested iteration")
+        return selected
+    if (test_root / "mesh").is_dir():
+        if iteration is not None or any(test_root.glob("ours_*")):
+            raise SceneError("ambiguous Gaussian checkpoints and textured-mesh renders")
+        return test_root / "mesh"
+    candidates = [(p, render_iteration(p.name)) for p in test_root.glob("ours_*") if p.is_dir()]
+    candidates = [(p, i) for p, i in candidates if i is not None]
     if iteration is not None:
-        return test_root / f"ours_{iteration}"
-    candidates = {p: render_iteration(p.name) for p in test_root.glob("ours_*") if p.is_dir()}
-    candidates = {p: i for p, i in candidates.items() if i is not None}
+        candidates = [(p, i) for p, i in candidates if i == iteration]
     if not candidates:
-        raise SceneError(
-            f"no held-out renders under {test_root}; "
-            "the backend was run without an evaluation split")
-    # Highest iteration wins, so a 7k checkpoint never shadows the final one.
-    return max(candidates, key=candidates.get)
+        raise SceneError(f"no held-out renders under {test_root} for iteration {iteration}; "
+                         "the backend may have been run without an evaluation split")
+    wanted = iteration if iteration is not None else max(i for _, i in candidates)
+    selected = [p for p, i in candidates if i == wanted]
+    if len(selected) != 1:
+        raise SceneError("ambiguous render variants at iteration " + str(wanted) + ": " +
+                         ", ".join(sorted(p.name for p in selected)) + "; select --render-variant explicitly")
+    return selected[0]
+
 
 
 def resolve_test_stems(scene: Scene) -> list[str]:
@@ -119,11 +139,19 @@ def pair_views(test_dir: Path, test_stems: list[str]) -> list[tuple[str, Path, P
         else:
             stem = render.stem
         pairs.append((stem, render, truth))
+    matched = [stem for stem, _, _ in pairs]
+    if len(matched) != len(set(matched)) or set(matched) != set(test_stems):
+        raise SceneError("held-out renders must cover the split exactly once")
+    if set(truths) != {render.stem for _, render, _ in pairs}:
+        raise SceneError("ground-truth exports and held-out renders disagree")
     return pairs
 
 
 def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
-          out_path: Path, extra: dict | None = None) -> dict:
+          out_path: Path, extra: dict | None = None, *,
+          require_masks: bool = False, require_complete: bool = False,
+          canonical_images: Path | None = None, resolution: int = -1,
+          require_native_raster: bool = False) -> dict:
     """Score every held-out render, masked to the specimen, and write the metrics as JSON.
 
     Args:
@@ -144,11 +172,38 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
     dists = metrics.Dists()
     pairs = pair_views(test_dir, test_stems)
 
+    originals = {}
+    if canonical_images is not None:
+        for path in Path(canonical_images).iterdir():
+            if path.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff") and ".mask." not in path.name:
+                if path.stem in originals: raise SceneError("ambiguous original photograph stem")
+                originals[path.stem] = path
     views, skipped, masked = [], [], 0
     with torch.no_grad():
         for stem, render_path, gt_path in pairs:
-            pred = _load_rgb(render_path, device)
-            truth = _load_rgb(gt_path, device)
+            native_size = None
+            source_hash = canonical_hash = None
+            resized_render = False
+            if canonical_images is not None:
+                from augenblick.eval.mesh_render import image_size
+                if stem not in originals: raise SceneError(f"{stem}: original photograph missing")
+                source = originals[stem]
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                with Image.open(source) as photo:
+                    size = image_size(dict(width=photo.width, height=photo.height), resolution)
+                    truth_image = photo.convert("RGB").resize(size, Image.Resampling.BICUBIC)
+                canonical_hash = hashlib.sha256(truth_image.tobytes()).hexdigest()
+                with Image.open(render_path) as render:
+                    native_size = list(render.size)
+                    resized_render = render.size != size
+                    if resized_render and require_native_raster:
+                        raise SceneError(f"{stem}: native render {render.size} must match canonical raster {size}")
+                    pred_image = render.convert("RGB").resize(size, Image.Resampling.BICUBIC) if resized_render else render.convert("RGB")
+                pred = torch.from_numpy(np.asarray(pred_image, dtype=np.float32).copy()/255).permute(2,0,1).to(device)
+                truth = torch.from_numpy(np.asarray(truth_image, dtype=np.float32).copy()/255).permute(2,0,1).to(device)
+            else:
+                pred = _load_rgb(render_path, device)
+                truth = _load_rgb(gt_path, device)
             if pred.shape != truth.shape:
                 raise SceneError(
                     f"{render_path.name}: render is {tuple(pred.shape)} but ground truth is "
@@ -156,7 +211,11 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
 
             mask = _load_mask(masks_dir, stem, pred.shape[1], pred.shape[2], device)
             fill = None
+            if mask is None and require_masks:
+                raise SceneError(f"{stem}: required scoring mask is missing")
             if mask is not None and float(mask.sum()) == 0.0:
+                if require_complete:
+                    raise SceneError(f"{stem}: empty scoring mask prevents complete evaluation")
                 # No domain to score over. The masked reductions would divide by a clamped
                 # denominator and report a perfect match, silently lifting the mean.
                 logger.warning(f"{stem}: mask is empty, skipping this view")
@@ -172,6 +231,14 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
 
             views.append({
                 "image": stem,
+                "render_sha256": hashlib.sha256(render_path.read_bytes()).hexdigest(),
+                "native_gt_sha256": hashlib.sha256(gt_path.read_bytes()).hexdigest(),
+                "mask_sha256": hashlib.sha256((masks_dir / (stem + '.png')).read_bytes()).hexdigest() if (masks_dir / (stem + '.png')).is_file() else None,
+                "canonical_photo_sha256": source_hash,
+                "canonical_rgb_sha256": canonical_hash,
+                "native_render_size": native_size,
+                "scored_size": [int(pred.shape[2]), int(pred.shape[1])],
+                "render_resampled": resized_render,
                 "psnr": metrics.psnr(pred, truth, mask),
                 "ssim": metrics.ssim(pred, truth, mask),
                 "lpips": lpips(pred, truth, mask),
@@ -193,6 +260,10 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
         "skipped": skipped,
         # Records which convention produced this file; see the module docstring.
         "metric_domain": METRIC_DOMAIN,
+        "scorer_source_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (Path(__file__), Path(metrics.__file__))},
+        "evaluation_protocol": "canonical_raw_photo_v1" if canonical_images is not None else "native_exports",
+        "resize_filter": "PIL BICUBIC",
+        "render_resampling_requires_publication_sensitivity_check": canonical_images is not None and any(v["render_resampled"] for v in views),
         "psnr": float(np.mean([v["psnr"] for v in views])),
         "ssim": float(np.mean([v["ssim"] for v in views])),
         "lpips": float(np.mean([v["lpips"] for v in views])),
@@ -206,11 +277,32 @@ def score(test_dir: Path, masks_dir: Path, test_stems: list[str],
 
 
 def score_output(scene: Scene, output_dir: Path, iteration: int | None = None,
-                 extra: dict | None = None) -> dict:
+                 extra: dict | None = None, *, require_masks: bool = False,
+                 require_complete: bool = False, canonical_images: bool = False,
+                 resolution: int = -1, require_native_raster: bool = False,
+                 render_variant: str | None = None) -> dict:
     """Score the held-out renders a backend left under output_dir against the scene."""
-    test_dir = find_test_dir(output_dir / "test", iteration)
-    return score(test_dir, scene.masks_dir, resolve_test_stems(scene),
-                 output_dir / METRICS_FILENAME, extra)
+    test_dir = find_test_dir(output_dir / "test", iteration, render_variant)
+    ordered = resolve_test_stems(scene)
+    manifests = list((output_dir / "native_selections").glob("render_*.json"))
+    if not manifests:
+        manifests = list((scene.root / "native_selections").glob("render_*.json"))
+    if manifests:
+        if len(manifests) != 1: raise SceneError("ambiguous native render selection manifests")
+        manifest = json.loads(manifests[0].read_text())
+        consumed = [r["name"] for r in manifest["test"]]
+        if len(consumed) != len(set(consumed)) or set(consumed) != set(ordered):
+            raise SceneError("native render camera partition disagrees with scene split")
+        ordered = consumed
+        extra = {**(extra or {}), "native_selection_manifest": str(manifests[0]),
+                 "native_selection_sha256": hashlib.sha256(manifests[0].read_bytes()).hexdigest()}
+    elif require_complete and test_dir.name != "mesh":
+        raise SceneError("complete workflow scoring requires an actual native render selection manifest")
+    return score(test_dir, scene.masks_dir, ordered,
+                 output_dir / METRICS_FILENAME, extra,
+                 require_masks=require_masks, require_complete=require_complete,
+                 canonical_images=scene.images_dir if canonical_images else None, resolution=resolution,
+                 require_native_raster=require_native_raster)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,10 +322,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True, help="Model directory to score")
     parser.add_argument("--iteration", type=int, default=None,
                         help="Checkpoint to score; defaults to the highest present")
+    parser.add_argument("--render-variant", help="Exact ours_<iteration>[_suffix] directory name")
+    parser.add_argument("--canonical-images", action="store_true")
+    parser.add_argument("--require-native-raster", action="store_true")
+    parser.add_argument("--canonical-resolution", type=int, default=-1)
+    parser.add_argument("--require-masks", action="store_true")
+    parser.add_argument("--require-complete", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        result = score_output(Scene(args.scene.resolve()), args.output.resolve(), args.iteration)
+        result = score_output(Scene(args.scene.resolve()), args.output.resolve(), args.iteration,
+                              require_masks=args.require_masks, require_complete=args.require_complete,
+                              canonical_images=args.canonical_images, resolution=args.canonical_resolution,
+                              require_native_raster=args.require_native_raster, render_variant=args.render_variant)
     except SceneError as exc:
         logger.error(str(exc))
         return 2

@@ -79,3 +79,68 @@ def test_render_iteration_ignores_suffixes():
 def test_find_test_dir_without_renders_is_an_error(tmp_path):
     with pytest.raises(SceneError, match="no held-out renders"):
         find_test_dir(tmp_path)
+
+
+def test_canonical_scoring_ignores_native_gt_compositing(tmp_path,monkeypatch):
+    import numpy as np
+    import torch
+    from PIL import Image
+    from augenblick.eval import nvs
+    class Distance:
+        def __call__(self,a,b,mask=None): return float(((a-b)**2).mean())
+    monkeypatch.setattr(nvs.metrics,'Lpips',lambda:Distance())
+    monkeypatch.setattr(nvs.metrics,'Dists',lambda:Distance())
+    monkeypatch.setattr(torch.cuda,'is_available',lambda:False)
+    images=tmp_path/'images';masks=tmp_path/'masks';images.mkdir();masks.mkdir()
+    rgb=np.full((32,48,3),180,dtype=np.uint8)
+    Image.fromarray(rgb).save(images/'view.png')
+    Image.fromarray(np.full((32,48),200,dtype=np.uint8)).save(masks/'view.png')
+    results=[]
+    for i in range(2):
+        output=tmp_path/str(i)
+        for sub in ('renders','gt'):(output/sub).mkdir(parents=True)
+        Image.fromarray(rgb).save(output/'renders/view.png')
+        # Backends may export raw or mask-composited photographs.
+        Image.fromarray(rgb if i==0 else (rgb*.5).astype(np.uint8)).save(output/'gt/view.png')
+        results.append(nvs.score(output,masks,['view'],output/'metrics.json',
+                                canonical_images=images,require_masks=True,require_complete=True))
+    assert results[0]['psnr']==results[1]['psnr']
+    assert results[0]['ssim']==results[1]['ssim']
+    assert results[0]['views'][0]['canonical_rgb_sha256']==results[1]['views'][0]['canonical_rgb_sha256']
+
+
+def test_paper_scoring_rejects_raster_resampling(tmp_path, monkeypatch):
+    import numpy as np
+    import torch
+    from PIL import Image
+    from augenblick.eval import nvs
+    class Distance:
+        def __call__(self, a, b, mask=None): return float(((a-b)**2).mean())
+    monkeypatch.setattr(nvs.metrics, "Lpips", lambda: Distance())
+    monkeypatch.setattr(nvs.metrics, "Dists", lambda: Distance())
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    images=tmp_path/"images";masks=tmp_path/"masks"
+    for d in (images,masks,tmp_path/"renders",tmp_path/"gt"):d.mkdir()
+    Image.new("RGB",(64,32),"white").save(images/"view.png")
+    Image.new("L",(64,32),255).save(masks/"view.png")
+    for d in ("renders","gt"):Image.new("RGB",(64,33),"white").save(tmp_path/d/"view.png")
+    with pytest.raises(SceneError, match="must match canonical raster"):
+        nvs.score(tmp_path,masks,["view"],tmp_path/"scores.json",canonical_images=images,
+                  require_native_raster=True,require_complete=True)
+
+
+def test_explicit_iteration_accepts_geo_suffix(tmp_path):
+    target = tmp_path / "ours_20000_r3.9";target.mkdir()
+    assert find_test_dir(tmp_path, 20000) == target
+
+
+def test_ambiguous_same_iteration_requires_variant(tmp_path):
+    for n in ("ours_20000_r3.9", "ours_20000_direct_eval"):(tmp_path / n).mkdir()
+    for iteration in (None, 20000):
+        with pytest.raises(SceneError, match="ambiguous render variants"):
+            find_test_dir(tmp_path, iteration)
+    assert find_test_dir(tmp_path, 20000, "ours_20000_direct_eval").name == "ours_20000_direct_eval"
+    with pytest.raises(SceneError, match="does not match"):
+        find_test_dir(tmp_path, 10000, "ours_20000_direct_eval")
+    with pytest.raises(SceneError, match="direct subdirectory"):
+        find_test_dir(tmp_path, render_variant="../ours_20000_r3.9")
