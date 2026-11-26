@@ -1085,7 +1085,8 @@ public:
 
 
 		// initialize_params is only expected to initialize m_params_full_precision. Cast and copy these over!
-		parallel_for_gpu(n_params, [params_fp=params_full_precision, params=params] __device__ (size_t i) {
+		// LOCAL PATCH (augenblick): qualified; CUDA 13's two-phase lookup no longer finds tcnn:: here.
+		tcnn::parallel_for_gpu(n_params, [params_fp=params_full_precision, params=params] __device__ (size_t i) {
 			params[i] = (T)params_fp[i];
 		});
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
@@ -1203,7 +1204,8 @@ public:
 		
 		printf("rotation n_params: %lu\n", n_params);
 
-		parallel_for_gpu(n_params, [params=accumulated_rotation->params(), params_hp=params_hp.data()] __device__ (size_t i) {
+		// LOCAL PATCH (augenblick): qualified; CUDA 13's two-phase lookup no longer finds tcnn:: here.
+		tcnn::parallel_for_gpu(n_params, [params=accumulated_rotation->params(), params_hp=params_hp.data()] __device__ (size_t i) {
 			params[i] = (T)params_hp[i];
 		});
 
@@ -1213,7 +1215,8 @@ public:
 
 		printf("transition n_params: %lu\n", n_params);
 
-		parallel_for_gpu(n_params, [params=accumulated_transition->params(), params_hp=params_hp.data()] __device__ (size_t i) {
+		// LOCAL PATCH (augenblick): qualified; CUDA 13's two-phase lookup no longer finds tcnn:: here.
+		tcnn::parallel_for_gpu(n_params, [params=accumulated_transition->params(), params_hp=params_hp.data()] __device__ (size_t i) {
 			params[i] = (T)params_hp[i];
 		});
 
@@ -1245,7 +1248,8 @@ public:
 		
 		printf("rotation n_params: %lu\n", n_params);
 
-		parallel_for_gpu(n_params, [params=m_delta_network->rotation()->params(), params_hp=params_hp.data()] __device__ (size_t i) {
+		// LOCAL PATCH (augenblick): qualified; CUDA 13's two-phase lookup no longer finds tcnn:: here.
+		tcnn::parallel_for_gpu(n_params, [params=m_delta_network->rotation()->params(), params_hp=params_hp.data()] __device__ (size_t i) {
 			params[i] = (T)params_hp[i];
 		});
 
@@ -1255,7 +1259,8 @@ public:
 
 		printf("transition n_params: %lu\n", n_params);
 
-		parallel_for_gpu(n_params, [params=m_delta_network->transition()->params(), params_hp=params_hp.data()] __device__ (size_t i) {
+		// LOCAL PATCH (augenblick): qualified; CUDA 13's two-phase lookup no longer finds tcnn:: here.
+		tcnn::parallel_for_gpu(n_params, [params=m_delta_network->transition()->params(), params_hp=params_hp.data()] __device__ (size_t i) {
 			params[i] = (T)params_hp[i];
 		});
 	}

@@ -36,7 +36,8 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo")
 endif()
 
-if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/glfw/CMakeLists.txt")
+# LOCAL PATCH (augenblick): glfw is vendored out with the GUI, so only check for it when the GUI is built.
+if (NGP_BUILD_WITH_GUI AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/glfw/CMakeLists.txt")
 	message(FATAL_ERROR
 		"Some instant-ngp dependencies are missing. "
 		"If you forgot the \"--recursive\" flag when cloning this project, "
@@ -55,14 +56,16 @@ else()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 endif()
 
-set(CMAKE_CXX_STANDARD 14)
+# LOCAL PATCH (augenblick): CUDA 13 (CCCL 3) requires C++17; upstream pinned 14.
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 ###############################################################################
 # CUDA compiler setup
 ###############################################################################
 
-set(CMAKE_CUDA_STANDARD 14)
+# LOCAL PATCH (augenblick): C++17, as above.
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
@@ -234,6 +237,8 @@ endif()
 ##########
 find_package(Python 3.7 COMPONENTS Interpreter Development)
 if (Python_FOUND)
+	# LOCAL PATCH (augenblick): make pybind11 reuse this FindPython result, not its legacy search (found /usr/bin/python3).
+	set(PYBIND11_FINDPYTHON ON)
 	add_subdirectory("dependencies/pybind11")
 endif()
 
