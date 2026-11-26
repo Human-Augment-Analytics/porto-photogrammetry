@@ -86,6 +86,7 @@ What changed against the plan while implementing, newest last. Each was verified
   also gained `meshroom`, which it was missing.
 - **The 30k run used its own `RESULT_ROOT`** (`$V/n30000`, `split.json` copied) so it ran in
   parallel with the 15k run.
+- **`n_steps` default raised to 30000** after check 9 (user's call); `mc_res` stays 1024.
 - **Pre-existing test failure, not ours:** `tests/test_recon_argv.py:546` repeats `extract=`
   (a `SyntaxError` from merge `8ec1aa5`), so that file does not collect on either branch.
 

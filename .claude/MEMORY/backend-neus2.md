@@ -68,14 +68,14 @@ unchanged as OpenCV camera-to-world (`from_na`), translation `(C − c)/r`. Mesh
 ## Reference run (2026-11-26)
 
 `UF_Mammals_19126_cranium`, COLMAP SfM, 432 views (378 train / 54 test) at 1600×1066, RTX PRO 6000,
-test env clone. Defaults (15k steps, `mc_res 1024`): staging 17 s, training 142 s, meshing 13 s,
+test env clone. 15k steps (upstream's recipe), `mc_res 1024`: staging 17 s, training 142 s, meshing 13 s,
 rendering 69 s, **246 s total**, ~0.8 GB host RSS; sphere `r = 0.772`, camera ratio 4.16.
 Held-out (masked, `canonical_raw_photo_v1`, `--require-native-raster --require-complete`): PSNR
 28.84, SSIM 0.876, LPIPS 0.145. Mesh vs the low-poly reference (similarity fit, as
 `_eval/gt_20261113`): F@0.5 % 0.958, F@0.1 % 0.647, Chamfer 0.136 %.
 
-- **30k steps**: 391 s; PSNR 29.05; F@0.1 % 0.774, F@0.5 % 0.965, Chamfer 0.109 %. Upstream's
-  15k under-trains fine detail at 432 views (fact 14 of the plan); the default is unchanged.
+- **30k steps, the default since 2026-11-26**: 391 s; PSNR 29.05; F@0.1 % 0.774, F@0.5 % 0.965,
+  Chamfer 0.109 %. Upstream's 15k under-trains fine detail at 432 views (fact 14 of the plan).
 - **`mc_res 512`** on the 15k snapshot: 9 s, 686k faces, F@0.5 % 0.958, F@0.1 % 0.647 — the
   same scores as 1024 at these tolerances.
 - Other backends on this specimen, F@0.5 %: pgsr 0.971, meshroom 0.965, gw 0.957, 2dgs 0.915,

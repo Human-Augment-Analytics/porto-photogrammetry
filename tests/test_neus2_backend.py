@@ -30,9 +30,9 @@ def test_neus2_argv():
     py = sys.executable
     assert prepare.cmd == [py, str(LIB / "prepare.py"), "-s", "/scene", "-m", "/out", "-r", "-1",
                            "--bound_percentile", "1.0", "--bound_margin", "1.1"]
-    assert train.cmd == [py, str(LIB / "train.py"), "-m", "/out", "--n_steps", "15000",
+    assert train.cmd == [py, str(LIB / "train.py"), "-m", "/out", "--n_steps", "30000",
                          "--ek_loss_weight", "0.01", "--mask_loss_weight", "0.0"]
-    assert mesh.cmd == [py, str(LIB / "extract_mesh.py"), "-m", "/out", "--n_steps", "15000",
+    assert mesh.cmd == [py, str(LIB / "extract_mesh.py"), "-m", "/out", "--n_steps", "30000",
                         "--mc_res", "1024", "--num_cluster", "1"]
 
 

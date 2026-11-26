@@ -27,7 +27,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[2])
     parser.add_argument("-s", "--source_path", type=Path, required=True, help="COLMAP scene")
     parser.add_argument("-m", "--model_path", type=Path, required=True, help="Output directory")
-    parser.add_argument("--n_steps", type=int, default=15000, help="Snapshot to render")
+    parser.add_argument("--n_steps", type=int, default=30000, help="Snapshot to render")
     parser.add_argument("--evaluation_resolution", type=int, default=-1,
                         help="Held-out downscale, independent of training; -1 caps the long side at 1600")
     args = parser.parse_args(argv)

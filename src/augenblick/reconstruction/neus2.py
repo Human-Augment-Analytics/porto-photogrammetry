@@ -23,8 +23,8 @@ __all__ = ["Neus2Backend", "Neus2Config"]
 class Neus2Config(EvalParams, ResolutionParams):
     """Training, bounding and mesh-extraction parameters forwarded to the NeuS2 stage scripts."""
 
-    n_steps: int = field(default=15000, metadata={
-        "help": "Training steps; 15000 is upstream's DTU recipe"})
+    n_steps: int = field(default=30000, metadata={
+        "help": "Training steps; upstream's DTU recipe is 15000, which under-trains fine detail at ~400 views"})
     ek_loss_weight: float = field(default=0.01, metadata={"help": "Eikonal loss weight"})
     mask_loss_weight: float = field(default=0.0, metadata={
         "help": "Mask BCE weight; 0 relies on alpha compositing, which already supervises the mask"})

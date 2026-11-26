@@ -20,7 +20,7 @@ logger = logging.getLogger("neus2.extract_mesh")
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[2])
     parser.add_argument("-m", "--model_path", type=Path, required=True, help="Output directory")
-    parser.add_argument("--n_steps", type=int, default=15000, help="Snapshot to mesh")
+    parser.add_argument("--n_steps", type=int, default=30000, help="Snapshot to mesh")
     parser.add_argument("--mc_res", type=int, default=1024, help="Marching-cubes grid per axis")
     parser.add_argument("--num_cluster", type=int, default=1,
                         help="Connected components to keep; 0 keeps every component")

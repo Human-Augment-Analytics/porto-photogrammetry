@@ -20,7 +20,7 @@ LOG_EVERY = 500
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[2])
     parser.add_argument("-m", "--model_path", type=Path, required=True, help="Output directory")
-    parser.add_argument("--n_steps", type=int, default=15000, help="Training steps")
+    parser.add_argument("--n_steps", type=int, default=30000, help="Training steps")
     parser.add_argument("--ek_loss_weight", type=float, default=0.01, help="Eikonal loss weight")
     parser.add_argument("--mask_loss_weight", type=float, default=0.0, help="Mask BCE loss weight")
     args = parser.parse_args(argv)

@@ -62,7 +62,7 @@ augenblick recon milo --scene <scene_dir> --output <output_dir> \
 
 # NeuS2: hash-grid SDF → marching cubes; needs pyngp in the env and a mask per registered image
 augenblick recon neus2 --scene <scene_dir> --output <output_dir> \
-    [--n_steps 15000] [--ek_loss_weight 0.01] [--mask_loss_weight 0.0] [--mc_res 1024] \
+    [--n_steps 30000] [--ek_loss_weight 0.01] [--mask_loss_weight 0.0] [--mc_res 1024] \
     [--num_cluster 1] [--bound_percentile 1.0] [--bound_margin 1.1] \
     [--evaluation_resolution -1] [--keep_staged] [-r -1] [--eval]
 ```
