@@ -54,7 +54,8 @@ compute capability.
 - `BACKENDS` (default `"sugar 2dgs pgsr gw geosvr milo"`) — subset of CUDA extensions to build
   (`geosvr` builds `src/libs/geosvr/cuda`, i.e. `svraster_cuda`; `milo` builds its RaDe-GS and
   GOF rasterisers, plus SuGaR's `simple-knn` and GW's `_ms`/`fused-ssim` when `sugar`/`gw` are
-  not also selected, so `BACKENDS=milo` alone is complete).
+  not also selected, so `BACKENDS=milo` alone is complete). `neus2` is **opt-in**, not in the
+  default: it builds NeuS2's `pyngp` (below).
 - `SKIP_TETRA=1` — skip the fragile CGAL `tetra_triangulation` build. That disables GW pivot
   extraction **and MILo**, whose Delaunay step uses it (`recon milo` refuses to start without it).
 - **Module-name collision:** MILo's RaDe-GS rasteriser installs upstream as
@@ -62,6 +63,32 @@ compute capability.
   The vendored copy is renamed `diff_gaussian_rasterization_radegs`; keep it renamed on any
   resync, and check any new backend's extension names against the env before building.
 - `PYTORCH3D_WHEEL=<url>` — install a prebuilt pytorch3d instead of the source build.
+
+### NeuS2: `pyngp` is a CMake build, per env
+
+`BACKENDS=neus2` (arm 8b of `setup_common.sh`, non-fatal like tetra) configures `src/libs/neus2`
+into `$CONDA_PREFIX/var/augenblick/neus2-build` with `TCNN_CUDA_ARCHITECTURES=${GPU_ARCH/./}`,
+builds only the `pyngp` target and copies `pyngp*.so` into site-packages. Out of tree because the
+checkout is shared by every env and the build is arch-specific. `pyngp` links no torch, so the
+torch/CUDA drift that constrains the other extensions does not touch it. On the rtx6000 env
+(`cuda/13.0.2`, gcc 12.2, `cmake/3.30.5`) a cold build takes ~3 min on 16 CPUs.
+
+- **pybind11 must be ≥ 2.12** for numpy 2: upstream bundled 2.7, which reads numpy 1's
+  `PyArray_Descr` layout and can return wrong strides silently. The vendored copy is 2.13.6.
+- **`PYBIND11_FINDPYTHON ON`** is patched in; without it pybind11 2.13 linked
+  `/usr/lib64/libpython3.9.so` although CMake had found the env's 3.10.
+- As of 2026-11-26 `pyngp` is only in the test clone `augenblick_rtx_pro_6000_neus2`, not
+  production; promoting it is a copy of the verified `.so` (plan step 10).
+
+### Cloning an env for a risky install
+
+`conda create -p <new> --clone <env> --offline` copies pip-installed packages too and rewrote
+every shebang and text prefix on the 7.7 GB rtx6000 env (2026-11-26). Checks that matter:
+`head -1 <new>/bin/augenblick`; a grep for the **old prefix not followed by the new suffix**
+(`augenblick_rtx_pro_6000(?!_neus2)`) — a plain grep matches the new prefix, which contains the
+old one; and ELF RUNPATHs (none named either env). Editable installs still point at the same
+checkout: re-run `pip install -e . --no-deps --no-build-isolation` from a git worktree to give the
+clone its own `augenblick`, and point jobs at it with `CONDA_ENV=<new>` (cluster-slurm.md).
 
 ### GeoSVR dependencies: keep `transformers` aligned with the hub pin
 

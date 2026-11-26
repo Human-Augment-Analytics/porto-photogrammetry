@@ -45,7 +45,7 @@ Both dirs carry the same set unless a row says otherwise.
 | File | Role |
 |------|------|
 | `scene_common.sh` | Roots, scene discovery, banner, timing CSV. Sourced by the two setup files below, never by a job directly |
-| `common.sh` | GPU switch, module loads, `HF_HOME`/`TORCH_HOME` exports, conda activate; then sources `scene_common.sh` |
+| `common.sh` | GPU switch, module loads, `HF_HOME`/`TORCH_HOME` exports, conda activate; then sources `scene_common.sh`. On HPG an exported `CONDA_ENV=<prefix>` overrides the per-GPU env (used to run jobs against a cloned test env); the banner's `conda env :` line shows which ran |
 | `meshroom_common.sh` | AliceVision env + sm gate (`MESHROOM_MAX_SM`); then sources `scene_common.sh` |
 | `template.sbatch` | Copy-and-edit starting point |
 | `mask.sbatch` | `MASK_METHOD=rembg\|threshold\|sam3`; consumes `<scene>/images`, emits a scene. `sam3` preflights CUDA |
@@ -55,7 +55,7 @@ Both dirs carry the same set unless a row says otherwise.
 | `colmap_sfm.sbatch` | Masked COLMAP SfM |
 | `turntable_sfm.sbatch` | Turntable refinement; runs the input SfM first if absent (`SFM=`) |
 | `hull_sfm.sbatch` | Visual-hull init; same, and requires masks |
-| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw\|geosvr`, `SFM=<name>` picks the input SfM |
+| `recon.sbatch` | `BACKEND=2dgs\|sugar\|pgsr\|gw\|geosvr\|milo\|neus2`, `SFM=<name>` picks the input SfM |
 | `meshroom_benchmark.sbatch` | Meshroom baseline |
 | `setup_env.sbatch` | Builds `augenblick_<card>` on a node of that GPU; refuses an arch mismatch |
 | `prepare_neurips.sbatch` | Flattens raw NeurIPS objects into `<scene>/{images,masks}` (HPG only) |

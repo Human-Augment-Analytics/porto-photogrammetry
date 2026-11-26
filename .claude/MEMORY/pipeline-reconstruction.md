@@ -59,11 +59,17 @@ augenblick recon milo --scene <scene_dir> --output <output_dir> \
     [--imp_metric indoor|outdoor] [--dense_gaussians] [--decoupled_appearance] \
     [--lambda_mask 0.1] [--white_background] [--extract tsdf|sdf] [--refine_iter 1000] \
     [--remove_oof_vertices] [--mesh_res 4096] [--num_cluster 50] [-r -1] [--eval]
+
+# NeuS2: hash-grid SDF → marching cubes; needs pyngp in the env and a mask per registered image
+augenblick recon neus2 --scene <scene_dir> --output <output_dir> \
+    [--n_steps 15000] [--ek_loss_weight 0.01] [--mask_loss_weight 0.0] [--mc_res 1024] \
+    [--num_cluster 1] [--bound_percentile 1.0] [--bound_margin 1.1] \
+    [--evaluation_resolution -1] [--keep_staged] [-r -1] [--eval]
 ```
 
 ## Wrapper-specific behaviour
 
-- **SuGaR / 2DGS / PGSR / GeoSVR / MILo** set `cwd` to the backend source dir (`use_cwd = True`;
+- **SuGaR / 2DGS / PGSR / GeoSVR / MILo / NeuS2** set `cwd` to the backend source dir (`use_cwd = True`;
   MILo's is `src/libs/milo/milo/`).
 - **`-r` / `--eval`** come from the shared `ResolutionParams` / `EvalParams` mixins on every
   backend except SuGaR. `-r -1` caps the long side at 1600 px (GeoSVR maps it onto its own
@@ -89,6 +95,11 @@ augenblick recon milo --scene <scene_dir> --output <output_dir> \
   training **and** extraction, which must agree. `--lambda_mask` (default 0.1) needs RaDe-GS and
   a mask per registered image, both checked in `validate()`, as is the `tetranerf` build.
   Details: [backend-milo.md](backend-milo.md).
+- **NeuS2** reads the scene in place and runs four of its own scripts from `src/libs/neus2/`
+  (staging, training, meshing, `--eval` rendering). Staging normalises the object into the unit
+  sphere and refuses one that reaches within 1.5r of a camera; the mesh is mapped back to the SfM
+  frame. `validate()` needs `pyngp`, pinhole cameras and a mask per registered image. A full
+  432-view run takes ~4 min. Details: [backend-neus2.md](backend-neus2.md).
 
 ## Output locations
 
@@ -99,8 +110,10 @@ augenblick recon milo --scene <scene_dir> --output <output_dir> \
 | PGSR | triangle mesh | `<model>/mesh/tsdf_fusion_post.ply` |
 | GeoSVR | triangle mesh | `<model>/mesh/tsdf/tsdf_fusion_post.ply` |
 | GW | raw / post / textured mesh | `<output>/mesh_ours_2pivots{,_post,_post_texture_refined_<iter-1>}.ply` |
+| NeuS2 | triangle mesh | `<output>/mesh/neus2_post.ply` (raw: `neus2_raw.ply`) |
 | MILo | Delaunay SDF mesh (`sdf`) / TSDF mesh (`tsdf`) | `<output>/mesh_learnable_sdf.ply` / `<output>/mesh_regular_tsdf_res<mesh_res>_post.ply` |
 
 Per-backend internals: [backend-sugar.md](backend-sugar.md), [backend-2dgs.md](backend-2dgs.md),
 [backend-pgsr.md](backend-pgsr.md), [backend-gaussian-wrapping.md](backend-gaussian-wrapping.md),
-[backend-geosvr.md](backend-geosvr.md), [backend-milo.md](backend-milo.md).
+[backend-geosvr.md](backend-geosvr.md), [backend-milo.md](backend-milo.md),
+[backend-neus2.md](backend-neus2.md).

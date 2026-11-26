@@ -13,7 +13,7 @@ module carries its own argparse main instead: `python -m augenblick.eval.{nvs,me
 ## Held-out split (`eval/split.py`)
 
 - `--eval` on a recon config comes from `EvalParams` in `reconstruction/base.py`, inherited by
-  `2dgs`, `pgsr`, `gw` and `geosvr`. **`sugar` does not inherit it** and hardcodes `--eval False`, so it
+  `2dgs`, `pgsr`, `gw`, `geosvr`, `milo` and `neus2`. **`sugar` does not inherit it** and hardcodes `--eval False`, so it
   has no `--eval` flag and produces no held-out metrics.
 - The first `--eval` run calls `write_split(scene.root)` → `<scene>/split.json`, holding out
   every 8th registered stem (`DEFAULT_HOLDOUT = 8`, the backends' shared `llffhold` rule). An

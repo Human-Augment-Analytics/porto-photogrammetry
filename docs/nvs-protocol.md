@@ -5,7 +5,7 @@ explicit manual split in `splits_manual/<specimen>/split.json`. The partition mu
 contain each registered image exactly once. Holding out SfM views is outside this
 protocol. Keep all-view and held-out reconstruction outputs separate.
 
-The benchmark workflow supports 2DGS, PGSR, GW, MILo, GeoSVR and Meshroom. It stages
+The benchmark workflow supports 2DGS, PGSR, GW, MILo, GeoSVR, NeuS2 and Meshroom. It stages
 a private scene per backend with the tree's selected images and masks. COLMAP
 binary/text files are read-only links inside a private sparse directory; generated
 PLY caches stay private. Computed output directories cannot be adopted symlinks.
@@ -112,8 +112,11 @@ GeoSVR `--resolution` controls native training size; `--evaluation_resolution`
 (default -1) independently controls held-out output size. In the workflow, the
 tree's `nvs_resolution` (default -1) is passed to both the GeoSVR held-out renderer
 and the canonical scorer. Configure that tree field rather than a conflicting
-backend-only evaluation flag. Non-GeoSVR renderers must likewise produce the
-configured shared raster; paper scoring still rejects resizing. Default paper
+backend-only evaluation flag. NeuS2 takes the same `--evaluation_resolution` from the
+same tree field; its held-out renderer sets each camera's intrinsics at that raster
+directly, and writes `native_selections/render_<resolution>.json` for complete scoring.
+Other renderers must likewise produce the configured shared raster; paper scoring still
+rejects resizing. Default paper
 settings are unchanged by this interface correction.
 
 Explicit checkpoint selection resolves `ours_<iteration>[_suffix]` directories.

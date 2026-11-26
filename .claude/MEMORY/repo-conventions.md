@@ -27,7 +27,8 @@ Landed: `augenblick-package-architecture.md` (the `src/augenblick` package and C
 `move-backends-to-src-libs.md` (relocating third-party backends under `src/libs/`),
 `masking-stage.md` (the `mask` stage, input mixins on `Method`), `sam3-masking-method.md`
 (the `sam3` mask method and its vendoring), `geosvr-reconstruction-backend.md` (the `geosvr`
-backend and its local patches).
+backend and its local patches), `neus2-reconstruction-backend.md` (the `neus2` backend, its
+local patches and the cloned-env verification).
 
 ## Code comment and docstring style
 

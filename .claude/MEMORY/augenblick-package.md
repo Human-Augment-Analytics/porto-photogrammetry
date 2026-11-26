@@ -42,7 +42,7 @@ augenblick recon --list
 
 `sfm`/`recon` take `--scene`; `mask` takes `--images` (a flat images folder — it produces a
 scene rather than consuming one). Methods: mask `rembg`, `threshold`, `sam3`; SfM `vggt`,
-`dvlt`, `colmap`, `turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`, `milo`.
+`dvlt`, `colmap`, `turntable`, `hull`; reconstruction `2dgs`, `sugar`, `pgsr`, `gw`, `geosvr`, `milo`, `neus2`.
 Evaluation is deliberately **not** a stage here: `python -m augenblick.eval.{nvs,mesh,scale}`
 (see pipeline-evaluation.md).
 
@@ -163,6 +163,13 @@ each `recon.sbatch` — an empty `sparse/0/` means SfM failed.
 Passthrough is gated on `accepts_passthrough` rather than applied globally, so a typo in any other
 backend is rejected instead of silently forwarded.
 
+- **NeuS2** runs no upstream script: upstream's `scripts/run.py` is unusable, so four first-party
+  scripts live in the vendored tree (`src/libs/neus2/{prepare,train,extract_mesh,render}.py`),
+  one stage each, with staging as a timed stage rather than a `prepare()` hook. Its module
+  exposes only `Neus2Backend` and `Neus2Config`; every other NeuS2 line is in `src/libs/neus2/`.
+  The mesh is mapped back to the SfM frame by the extraction script. `pyngp` is a per-env CMake
+  build, checked by `find_spec` in `validate()`. See [backend-neus2.md](backend-neus2.md).
+
 ## Adding a new backend
 
 1. Create `reconstruction/<name>.py` with a frozen `<Name>Config` dataclass (one field per
@@ -232,7 +239,8 @@ completion; `mesh_path()` matches where the backend actually wrote.
 
 Since then PGSR and GW have run through the package on all 76 dataset scenes
 (`colmap-{pgsr,gw}` under the HPG `RESULT_ROOT`, each with a mesh at `mesh_path()`), and GeoSVR
-was verified on `UF_Herp_87980_cranium` (backend-geosvr.md). **SuGaR has still never been run
+was verified on `UF_Herp_87980_cranium` (backend-geosvr.md), and NeuS2 on
+`UF_Mammals_19126_cranium` (backend-neus2.md). **SuGaR has still never been run
 through the package.**
 
 ## Known follow-up work
