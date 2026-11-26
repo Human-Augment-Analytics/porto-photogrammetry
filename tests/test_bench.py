@@ -280,7 +280,7 @@ def test_a_hand_written_split_is_checked_against_the_reconstruction():
             check_split(broken, stems)
 
 
-@pytest.mark.parametrize("backend", ["geosvr", "milo"])
+@pytest.mark.parametrize("backend", ["geosvr", "milo", "neus2"])
 def test_links_adopts_available_optional_backends(tmp_path, backend):
     from augenblick.bench import links
 

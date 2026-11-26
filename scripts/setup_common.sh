@@ -2,7 +2,8 @@
 # Shared installer behind the per-GPU wrappers (setup_l40s/a100/b200.sh, auto_setup.sh).
 # Wrappers must export: GPU_LABEL, GPU_ARCH, CUDA_MODULE, TORCH_SPEC, TORCH_INDEX_URL,
 # NUMPY_GENERATION (1 or 2, matching the torch wheel's numpy C-ABI).
-# Optional: BACKENDS (default "sugar 2dgs pgsr gw geosvr milo"), SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
+# Optional: BACKENDS (default "sugar 2dgs pgsr gw geosvr milo"; add neus2 to build NeuS2's pyngp),
+# SKIP_TETRA=1, PYTORCH3D_WHEEL=<url>.
 set -euo pipefail
 
 : "${GPU_LABEL:?set by wrapper}"
@@ -157,6 +158,20 @@ case " $BACKENDS " in *" gw "*|*" milo "*)
           && python -m pip install -e . --no-build-isolation
         ) || echo "WARN: tetra_triangulation build failed (GW pivot extraction and MILo unavailable; other backends fine)."
     fi
+    ;;
+esac
+
+# --- 8b. NeuS2's pyngp (CMake, no torch linkage; opt-in via BACKENDS) -----------
+case " $BACKENDS " in *" neus2 "*)
+    banner "8b/9 NeuS2 pyngp (CMake)"
+    # Per-env build dir: the checkout is shared by every env, and the build is arch-specific.
+    NEUS2_BUILD="${CONDA_PREFIX:?activate the env first}/var/augenblick/neus2-build"
+    ( TCNN_CUDA_ARCHITECTURES="${GPU_ARCH/./}" cmake -S src/libs/neus2 -B "$NEUS2_BUILD" \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNGP_BUILD_WITH_GUI=OFF -DNGP_BUILD_WITH_VULKAN=OFF \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DPython_EXECUTABLE="$(command -v python)" \
+      && cmake --build "$NEUS2_BUILD" --target pyngp -j "${SLURM_CPUS_PER_TASK:-8}" \
+      && cp "$NEUS2_BUILD"/pyngp*.so "$(python -c 'import sysconfig;print(sysconfig.get_paths()["platlib"])')/"
+    ) || echo "WARN: NeuS2 pyngp build failed (neus2 unavailable; other backends fine)."
     ;;
 esac
 

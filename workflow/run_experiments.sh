@@ -17,9 +17,9 @@ SNAKEMAKE_MODULE="${SNAKEMAKE_MODULE:-snakemake/7.32.4}"
 
 for backend in $BACKENDS; do
     case "$backend" in
-        2dgs|pgsr|gw|milo|geosvr|meshroom) ;;
+        2dgs|pgsr|gw|milo|geosvr|neus2|meshroom) ;;
         sugar) echo "ERROR: sugar cannot honour a split; see the note above" >&2; exit 2 ;;
-        *) echo "ERROR: unknown backend '$backend' (valid: 2dgs, pgsr, gw, milo, geosvr, meshroom)" >&2; exit 2 ;;
+        *) echo "ERROR: unknown backend '$backend' (valid: 2dgs, pgsr, gw, milo, geosvr, neus2, meshroom)" >&2; exit 2 ;;
     esac
 done
 

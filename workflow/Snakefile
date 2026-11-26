@@ -28,6 +28,7 @@ MESH_PATHS = {
     "gw": "mesh_ours_2pivots_post.ply",
     "milo": "mesh_regular_tsdf_res4096_post.ply",
     "geosvr": "mesh/tsdf/tsdf_fusion_post.ply",
+    "neus2": "mesh/neus2_post.ply",
     "meshroom": "textured_mesh/texturedMesh.obj",
 }
 MESH_PATHS.update(CONF.get("mesh_paths", {}))
@@ -56,9 +57,10 @@ def backend_arguments(wildcards):
     forbidden = {"--scene", "--output", "--eval", "--score", "--no-score"}
     if any(a.split("=", 1)[0] in forbidden for a in arguments):
         raise ValueError("workflow owns scene, output, split and scoring flags")
-    if wildcards.backend == "geosvr" and SPLIT:
+    # These backends render held-out views at a raster of their own, which the workflow pins.
+    if wildcards.backend in {"geosvr", "neus2"} and SPLIT:
         if any(a.split("=", 1)[0] == "--evaluation_resolution" for a in arguments):
-            raise ValueError("workflow owns GeoSVR evaluation_resolution; set nvs_resolution in the tree")
+            raise ValueError(f"workflow owns {wildcards.backend} evaluation_resolution; set nvs_resolution in the tree")
         arguments = [*arguments, "--evaluation_resolution", str(EVALUATION_RESOLUTION)]
     return shlex.join(a.replace("{specimen}", wildcards.specimen).replace("{tree}", str(TREE))
                       for a in arguments)

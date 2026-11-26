@@ -1,6 +1,6 @@
 # Sourced by every sbatch script except the Meshroom baseline: GPU switch, modules, model
 # caches, conda activate, then scene_common.sh. Not executable on its own.
-# Set GPU=rtx6000|b200 before submitting to switch targets.
+# Set GPU=rtx6000|b200 before submitting to switch targets; CONDA_ENV=<prefix> overrides the env.
 
 set -euo pipefail
 
@@ -11,13 +11,13 @@ GPU="${GPU:-rtx6000}"
 # card, since HPG selects with --gpus=1 plus a partition rather than a gres name.
 case "$GPU" in
     rtx6000)
-        CONDA_ENV="$CONDA_ROOT/augenblick_rtx_pro_6000"
+        CONDA_ENV="${CONDA_ENV:-$CONDA_ROOT/augenblick_rtx_pro_6000}"
         CUDA_MODULE="cuda/13.0.2"
         GPU_ARCH="12.0"
         GPU_PARTITION="hpg-rtx6000"
         ;;
     b200)
-        CONDA_ENV="$CONDA_ROOT/augenblick_b200"
+        CONDA_ENV="${CONDA_ENV:-$CONDA_ROOT/augenblick_b200}"
         CUDA_MODULE="cuda/12.8"
         GPU_ARCH="10.0"
         GPU_PARTITION="hpg-b200"

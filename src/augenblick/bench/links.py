@@ -21,6 +21,7 @@ LINKED_STAGES = [
     ("gw", "reconstructions", "{spec}/colmap-gw", False),
     ("geosvr", "reconstructions", "{spec}/colmap-geosvr", False),
     ("milo", "reconstructions", "{spec}/colmap-milo", False),
+    ("neus2", "reconstructions", "{spec}/colmap-neus2", False),
 ]
 
 
