@@ -401,7 +401,8 @@ def test_geosvr_eval_also_renders_held_out_views(tmp_path):
     assert [s.name for s in stages] == ["GeoSVR training", "Rendering", "TSDF mesh extraction"]
     assert stages[0].cmd[-2:] == ["--test_iterations", "-1"]
     # One call renders both splits: held-out views for scoring, train views for TSDF colour.
-    assert stages[1].cmd == [sys.executable, str(GEOSVR / "render.py"), "-m", "/out"]
+    assert stages[1].cmd == [sys.executable, str(GEOSVR / "render.py"), "-m", "/out",
+                             "--canonical_test_resolution", "-1"]
 
 
 def test_geosvr_always_renders_train_views_for_tsdf(tmp_path):
@@ -540,7 +541,7 @@ def test_milo_fast_recipe_defaults():
 
 
 def test_milo_overrides_reach_train_and_extract():
-    cfg = MiloConfig(iterations=5000, densify_until_iter=3000, regularization_from_iter=2000,
+    cfg = MiloConfig(extract="sdf", iterations=5000, densify_until_iter=3000, regularization_from_iter=2000,
                      eval=True, white_background=True, dense_gaussians=True,
                      decoupled_appearance=True, extract="sdf", remove_oof_vertices=True,
                      resolution=2)
